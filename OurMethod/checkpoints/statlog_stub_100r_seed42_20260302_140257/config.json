@@ -1,0 +1,18 @@
+{
+  "dataset": "statlog",
+  "model": "stub",
+  "custom_model": null,
+  "n_rounds": 100,
+  "cold_start_n": 10,
+  "seed": 42,
+  "z_dim": 16,
+  "c_ucb1": 1.0,
+  "alpha_linucb": 1.0,
+  "c_sim": 1.0,
+  "offline_freq": 50,
+  "offline_epochs": 10,
+  "warmup_epochs": 15,
+  "cold_start_tag": null,
+  "no_cache": false,
+  "saved_at": "2026-03-02T14:02:57.096845"
+}

@@ -1,0 +1,322 @@
+[
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.8588423967814703,
+   "predicted_std": 0.18774447643142644
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.8804352311744869,
+   "predicted_std": 0.16761231280684347
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.7113974809356077,
+   "predicted_std": 0.11990091006938222
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.615856743737662,
+   "predicted_std": 0.09067824246230746
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.8608823518006465,
+   "predicted_std": 0.2042511070991644
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.23805184445474536,
+   "predicted_std": 0.12148919059346755
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.06288155059606182,
+   "predicted_std": 0.09894748278144047
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.683072769392154,
+   "predicted_std": 0.31414282003501215
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.528216418768469,
+   "predicted_std": 0.32166073511192844
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.6602078793176186,
+   "predicted_std": 0.1996770236650286
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.6933478988273657,
+   "predicted_std": 0.2748808973335881
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.5549909832450041,
+   "predicted_std": 0.11213905881390276
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.5255738763513401,
+   "predicted_std": 0.167013849267534
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.8766577377885343,
+   "predicted_std": 0.14429043456305699
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.5377600586315484,
+   "predicted_std": 0.23574916862982698
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.5419490515250682,
+   "predicted_std": 0.24027756506430015
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.6857107180993581,
+   "predicted_std": 0.11085557810617966
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.95,
+   "predicted_std": 0.1828649640702661
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.5973086240702453,
+   "predicted_std": 0.2720167240079569
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.05,
+   "predicted_std": 0.3158346148663979
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.1697227894480151,
+   "predicted_std": 0.15348515054846773
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.2848548215412581,
+   "predicted_std": 0.09118738786688342
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.3238912257270651,
+   "predicted_std": 0.07530802349685142
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.5590803218762825,
+   "predicted_std": 0.15473174045639174
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.7934486519342299,
+   "predicted_std": 0.13136118225426213
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.95,
+   "predicted_std": 0.28569535333855756
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.4302542324066695,
+   "predicted_std": 0.24056289771220946
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.9391647735583029,
+   "predicted_std": 0.15890241561166646
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.95,
+   "predicted_std": 0.09646935499961196
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.7343010134470246,
+   "predicted_std": 0.3385815561534126
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.05152168178263905,
+   "predicted_std": 0.20234714019473327
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.3072326478610231,
+   "predicted_std": 0.17984800805505652
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.8971399808954947,
+   "predicted_std": 0.11624126843964032
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.619647111569624,
+   "predicted_std": 0.2652679672661879
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.07327063880383367,
+   "predicted_std": 0.1410338808111204
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.6951230167535174,
+   "predicted_std": 0.17046236422448235
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.13169022891649684,
+   "predicted_std": 0.343785513419917
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.17592982630711995,
+   "predicted_std": 0.3101544142396196
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.20394769168779425,
+   "predicted_std": 0.16835779002389753
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.5998261677022181,
+   "predicted_std": 0.1418767610419218
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.6246376236269358,
+   "predicted_std": 0.15275219298329262
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.20250069425347172,
+   "predicted_std": 0.11417875513831559
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.4389210712682936,
+   "predicted_std": 0.27706943788899013
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.40751597441168086,
+   "predicted_std": 0.20585072529013765
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.95,
+   "predicted_std": 0.144774308851153
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.25731946120964144,
+   "predicted_std": 0.12879994580291404
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.11380808938167997,
+   "predicted_std": 0.152504233131924
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.19751741219017205,
+   "predicted_std": 0.18717089468817305
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.18439341442261503,
+   "predicted_std": 0.21420187533748575
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.05311926353691776,
+   "predicted_std": 0.25860018241309624
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.6348320811985343,
+   "predicted_std": 0.1681426481534991
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.64645607003171,
+   "predicted_std": 0.08361349163279683
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.9341892574610693,
+   "predicted_std": 0.2568350398061487
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.8521589006284145,
+   "predicted_std": 0.059552652510758725
+  }
+ ],
+ [
+  {
+   "arm_id": 0,
+   "predicted_mean": 0.2815067442411887,
+   "predicted_std": 0.123475257172073
+  },
+  {
+   "arm_id": 1,
+   "predicted_mean": 0.19157863082345516,
+   "predicted_std": 0.3480153289212845
+  },
+  {
+   "arm_id": 2,
+   "predicted_mean": 0.1217119826446379,
+   "predicted_std": 0.0880972779633413
+  },
+  {
+   "arm_id": 3,
+   "predicted_mean": 0.7576732593923643,
+   "predicted_std": 0.22811057081550562
+  },
+  {
+   "arm_id": 4,
+   "predicted_mean": 0.061423929317050985,
+   "predicted_std": 0.12639254648929577
+  },
+  {
+   "arm_id": 5,
+   "predicted_mean": 0.3800476595758875,
+   "predicted_std": 0.12515460005190765
+  }
+ ]
+]
