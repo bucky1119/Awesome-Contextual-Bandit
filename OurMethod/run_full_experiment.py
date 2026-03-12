@@ -74,34 +74,41 @@ def build_registry(custom_model: Optional[str] = None,
     reg = FrozenLLMRegistry()
     reg.register("stub", StubFrozenLLM(hidden_dim=128, generate_ds_llm=True))
 
-    if selected_model == "smollm2":
+    preset_models = {
+        "smollm2": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "qwen2_5_7b": "/home/csg/Awesome-contextual-bandits/models/huggingface/Qwen2.5-7B-Instruct",
+        "llama3_1_8b": "meta-llama/Llama-3.1-8B-Instruct",
+    }
+
+    if selected_model in preset_models:
+        model_id = preset_models[selected_model]
         # 优先用 MLX (Apple Silicon 2.5x 生成加速)，回退到 PyTorch
         if _HAS_MLX:
             try:
-                print("[INFO] 加载 SmolLM2-360M-Instruct (MLX) ...")
-                reg.register("smollm2", MLXGenerativeFrozenLLM(
-                    model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+                print(f"[INFO] 加载 {model_id} (MLX) ...")
+                reg.register(selected_model, MLXGenerativeFrozenLLM(
+                    model_name=model_id,
                     max_new_tokens=max_new_tokens, temperature=0.1,
                     generate_ds_llm=True,
                 ), default=True)
             except Exception as e:
                 print(f"[WARN] MLX 加载失败: {e}，尝试 PyTorch...")
                 if _HAS_TRANSFORMERS:
-                    reg.register("smollm2", GenerativeFrozenLLM(
-                        model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+                    reg.register(selected_model, GenerativeFrozenLLM(
+                        model_name=model_id,
                         max_new_tokens=max_new_tokens, temperature=0.1,
                         use_chat_template=True, generate_ds_llm=True,
                     ), default=True)
         elif _HAS_TRANSFORMERS:
             try:
-                print("[INFO] 加载 SmolLM2-360M-Instruct (PyTorch) ...")
-                reg.register("smollm2", GenerativeFrozenLLM(
-                    model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+                print(f"[INFO] 加载 {model_id} (PyTorch) ...")
+                reg.register(selected_model, GenerativeFrozenLLM(
+                    model_name=model_id,
                     max_new_tokens=max_new_tokens, temperature=0.1,
                     use_chat_template=True, generate_ds_llm=True,
                 ), default=True)
             except Exception as e:
-                print(f"[WARN] 无法加载 SmolLM2: {e}")
+                print(f"[WARN] 无法加载 {model_id}: {e}")
 
     if custom_model:
         name = custom_model.split("/")[-1].lower().replace("-", "_")
@@ -235,7 +242,10 @@ def run_our_method_pipeline(
     ckpt: Optional[CheckpointManager] = None,
     arms: Optional[List[Arm]] = None,
     prompt_builder: Optional[StructuredPromptBuilder] = None,
-) -> Dict[str, np.ndarray]:
+    dump_prompts: int = 0,
+    ablation_mode: str = "none",
+    run_timestamp: Optional[str] = None,
+) -> Dict[str, Any]:
     """运行 OurMethod 完整闭环流程。
 
     公平性: 在线阶段使用 cmab.context(cold_start_n + i) 保证与 baseline 看同一组数据。
@@ -248,6 +258,15 @@ def run_our_method_pipeline(
         arms:            自定义 Arm 列表 (None = 使用默认 class_1..class_K)
         prompt_builder:  自定义 PromptBuilder (None = 使用默认通用 builder)
     """
+    if run_timestamp is None:
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    import time
+    t_start_total = time.time()
+    t_cold_start = 0.0
+    t_warmup = 0.0
+    t_online_infer = 0.0
+    t_online_offline_train = 0.0
 
     # ---- 0.1) 构建注册表 ---- #
     effective_name = model_name
@@ -298,6 +317,7 @@ def run_our_method_pipeline(
     policy = CombinedUCBPolicy(
         num_actions=num_actions, z_dim=z_dim,
         c_ucb1=c_ucb1, alpha_linucb=alpha_linucb, c_sim=c_sim,
+        ablation_mode=ablation_mode,
     )
 
     # ---- 仿真离线数据集 + 真实离线数据集 ---- #
@@ -325,6 +345,7 @@ def run_our_method_pipeline(
             print(f"  SimStats: {policy.sim_stats.summary()}")
         else:
             # ---- 实际运行冷启动 ---- #
+            t0_cold_start = time.time()
             print(f"\n{'=' * 60}")
             print(f"Phase 0: 冷启动 ({cold_start_n} contexts)")
             print(f"{'=' * 60}")
@@ -332,7 +353,15 @@ def run_our_method_pipeline(
             prev_gen = llm.generate_ds_llm
             llm.generate_ds_llm = True
 
-            cs_contexts = [cmab.context(i) for i in range(cold_start_n)]
+            # 兼容 cmab.texts，用于传递 env_fields (例如 ag_news 的本文)
+            cs_contexts = []
+            for i in range(cold_start_n):
+                feat = cmab.context(i)
+                env_f = {}
+                if hasattr(cmab, 'texts') and getattr(cmab, 'texts') is not None:
+                    env_f["text"] = str(cmab.texts[i])
+                cs_contexts.append(Context(features=feat, env_fields=env_f))
+                
             simulator = ColdStartSimulator(llm, pb, arms)
             all_ds, all_h = simulator.warmup_policy(policy, cs_contexts, verbose=verbose)
 
@@ -356,7 +385,7 @@ def run_our_method_pipeline(
                 all_h=all_h,
                 all_ds=all_ds,
                 sim_stats=policy.sim_stats,
-                contexts=cs_contexts,
+                contexts=[c.features for c in cs_contexts],
                 metadata={
                     "dataset": dataset_name,
                     "model": effective_name,
@@ -365,11 +394,14 @@ def run_our_method_pipeline(
                 },
             )
             print(f"  [CACHE] 已保存冷启动缓存: {cache_dir}")
+            
+            t_cold_start = time.time() - t0_cold_start
 
     # ================================================================== #
     #  Phase 1: 热启动训练 Compressor                                      #
     # ================================================================== #
     if len(sim_dataset) > 0:
+        t0_warmup = time.time()
         print(f"\n{'=' * 60}")
         print(f"Phase 1: 热启动训练 fφ ({warmup_epochs} epochs, {len(sim_dataset)} samples)")
         print(f"{'=' * 60}")
@@ -379,6 +411,8 @@ def run_our_method_pipeline(
                                batch_size=64, verbose=verbose)
         trainer.rebuild_policy_stats(sim_dataset)
         print(f"  热启动 loss: {losses[0]:.6f} → {losses[-1]:.6f}")
+        
+        t_warmup += time.time() - t0_warmup
 
         # ---- 检查点: 热启动后 fφ + loss ---- #
         if ckpt:
@@ -410,16 +444,44 @@ def run_our_method_pipeline(
 
     t0 = time.time()
     for step in range(n_rounds):
+        t_step_start = time.time()
         idx = cold_start_n + step
+        
+        # 临时开启生成以保存 DEBUG
+        if step < dump_prompts:
+            llm.generate_ds_llm = True
 
         # --- 1) 获取上下文 --- #
         feat = cmab.context(idx)
-        ctx = Context(features=feat)
+        env_f = {}
+        if hasattr(cmab, 'texts') and getattr(cmab, 'texts') is not None:
+            env_f["text"] = str(cmab.texts[idx])
+        ctx = Context(features=feat, env_fields=env_f)
 
         # --- 2) LLM encode → compress → select --- #
         feedback = history[-5:] if history else None
         prompt = pb.build(ctx, arms, feedback)
+        
         h_t, ds_llm = llm.encode(prompt, num_arms=num_actions)
+        
+        if step < dump_prompts:
+            # 恢复状态，避免不小心让整个在线流程全部推理变慢
+            llm.generate_ds_llm = False
+            
+            debug_dir = os.path.join(ROOT, "results", "ourmethod_debug", dataset_name)
+            os.makedirs(debug_dir, exist_ok=True)
+            dump_path = os.path.join(debug_dir, f"{run_timestamp}_prompts_step{step}.txt")
+            with open(dump_path, "w", encoding="utf-8") as f:
+                f.write("=== PROMPT ===\n")
+                f.write(prompt)
+                f.write("\n\n=== DS_LLM OUTPUT ===\n")
+                if ds_llm is not None:
+                    for d in ds_llm:
+                        f.write(f"Arm {d.arm_id}: mean={d.predicted_mean}, std={d.predicted_std}\n")
+                else:
+                    f.write("None\n")
+            if step == dump_prompts - 1:
+                print(f"[DEBUG] Dumped {dump_prompts} prompts and ds_llm to {debug_dir}")
         z_t = comp.forward(h_t)
         arm_id = policy.select(ctx, arms, z_t, ds_llm)
 
@@ -427,12 +489,23 @@ def run_our_method_pipeline(
         r = cmab.reward(idx, arm_id)
 
         # --- 4) 记录 --- #
+        debug = policy.get_last_debug() if hasattr(policy, "get_last_debug") else {}
+        
         rec = DecisionRecord(
             step=step, context=ctx, arms=arms, prompt=prompt,
             h_t=h_t, z_t=z_t, ds_llm=ds_llm,
             chosen_arm=arm_id, reward=r,
             optimal_reward=float(opt_rewards[step]),
             regret=float(opt_rewards[step]) - r,
+            ucb_values=debug.get("ucb_values"),
+            ucb_s1=debug.get("ucb_s1"),
+            ucb_s2=debug.get("ucb_s2"),
+            ucb_s3=debug.get("ucb_s3"),
+            radius_ucb1=debug.get("radius_ucb1"),
+            radius_linucb=debug.get("radius_linucb"),
+            radius_llm=debug.get("radius_llm"),
+            min_source=debug.get("min_source"),
+            algorithm=getattr(policy, "name", "combined_ucb"),
         )
         policy.update(rec)
         history.append(rec)
@@ -456,17 +529,30 @@ def run_our_method_pipeline(
         # --- 5) 积累真实离线数据 --- #
         real_dataset.add(h_t, arm_id, r)
 
+        t_online_infer += time.time() - t_step_start
+
         # --- 6) 周期性离线训练 --- #
         if (offline_freq > 0
                 and (step + 1) % offline_freq == 0
                 and len(real_dataset) > 50):
+            t_offline_train_start = time.time()
             combined_ds = InMemoryOfflineDataset(h_dim=h_dim)
-            for j in range(len(sim_dataset)):
-                h_j, a_j, r_j = sim_dataset[j]
-                combined_ds.add(h_j.numpy(), int(a_j), float(r_j))
+            
+            # =============== [备份原始 回放/累加 逻辑] ===============
+            # 之前的方案：在线更新时，会将 Phase 0 的全体仿真数据 (sim_dataset)
+            # 与在线收集的真实数据 (real_dataset) 一起混合给压缩器重新训练。
+            # for j in range(len(sim_dataset)):
+            #     h_j, a_j, r_j = sim_dataset[j]
+            #     combined_ds.add(h_j.numpy(), int(a_j), float(r_j))
+            # =========================================================
+
+            # [新方针]: 仿真数据仅在冷启动预热阶段使用。
+            # 在线运行一旦开启后，只使用现阶段环境真实反馈的记录数据 (real_dataset) 进行训练。
             for j in range(len(real_dataset)):
                 h_j, a_j, r_j = real_dataset[j]
                 combined_ds.add(h_j.numpy(), int(a_j), float(r_j))
+            
+
 
             trainer = OfflineTrainer(comp, policy, lr=1e-3)
             losses = trainer.train(combined_ds, epochs=offline_epochs,
@@ -484,6 +570,8 @@ def run_our_method_pipeline(
                 ckpt.save_compressor(comp, f"step{step + 1}")
                 ckpt.record_offline_loss("periodic", step=step + 1,
                                          losses=losses, data_size=len(combined_ds))
+                                         
+            t_online_offline_train += time.time() - t_offline_train_start
 
         # --- 7) 进度打印 --- #
         if verbose and step % max(1, n_rounds // 10) == 0:
@@ -508,6 +596,8 @@ def run_our_method_pipeline(
           f"avg={np.mean(rewards):.4f}  acc={accuracy:.4f}  time={elapsed:.1f}s")
     print(f"  SimStats: {policy.sim_stats.summary()}")
     print(f"  真实数据集: {len(real_dataset)} 条; 仿真数据集: {len(sim_dataset)} 条")
+    
+    t_total = time.time() - t_start_total
 
     return {
         "actions": actions, "rewards": rewards,
@@ -516,6 +606,14 @@ def run_our_method_pipeline(
         "step_regret": step_reg,
         "cumulative_regret": cum_reg,
         "cumulative_reward": np.cumsum(rewards),
+        "history": history,
+        "times": {
+            "total_execution_time": t_total,
+            "phase0_cold_start_time": t_cold_start,
+            "phase1_warmup_train_time": t_warmup,
+            "phase2_online_infer_time": t_online_infer,
+            "phase2_periodic_offline_train_time": t_online_offline_train,
+        }
     }
 
 
@@ -685,7 +783,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="OurMethod Full Pipeline: cold-start → warm-up → online → offline → compare")
     parser.add_argument("--model", dest="model_name", type=str, default="stub",
-                        help="LLM model: stub | smollm2")
+                        help="LLM model: stub | smollm2 | qwen2_5_7b | llama3_1_8b")
     parser.add_argument("--custom_model", type=str, default=None,
                         help="HuggingFace model ID (e.g. HuggingFaceTB/SmolLM2-360M-Instruct)")
     parser.add_argument("--n_rounds", type=int, default=5000,

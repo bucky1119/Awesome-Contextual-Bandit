@@ -10,6 +10,8 @@
 预注册模型:
   stub         — 伪特征（基线对比）
   smollm2      — HuggingFaceTB/SmolLM2-360M-Instruct
+    qwen2_5_7b   — Qwen/Qwen2.5-7B-Instruct
+    llama3_1_8b  — meta-llama/Llama-3.1-8B-Instruct
   (可通过 --custom_model 加载任意 HuggingFace 模型)
 
 用法:
@@ -57,14 +59,21 @@ def build_registry(custom_model: Optional[str] = None,
     # 总是注册 stub（无依赖，零开销）
     reg.register("stub", StubFrozenLLM(hidden_dim=128, generate_ds_llm=True))
 
+    preset_models = {
+        "smollm2": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "qwen2_5_7b": "/home/csg/Awesome-contextual-bandits/models/huggingface/Qwen2.5-7B-Instruct",
+        "llama3_1_8b": "meta-llama/Llama-3.1-8B-Instruct",
+    }
+
     # 仅当选中对应模型 且 transformers 可用 时才实际加载
-    if _HAS_TRANSFORMERS and selected_model == "smollm2":
+    if _HAS_TRANSFORMERS and selected_model in preset_models:
+        model_id = preset_models[selected_model]
         try:
-            print("[INFO] 加载 SmolLM2-360M-Instruct ...")
+            print(f"[INFO] 加载 {model_id} ...")
             reg.register(
-                "smollm2",
+                selected_model,
                 GenerativeFrozenLLM(
-                    model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+                    model_name=model_id,
                     max_new_tokens=384,
                     temperature=0.1,
                     use_chat_template=True,
@@ -73,7 +82,7 @@ def build_registry(custom_model: Optional[str] = None,
                 default=True,
             )
         except Exception as e:
-            print(f"[WARN] 无法加载 SmolLM2: {e}")
+            print(f"[WARN] 无法加载 {model_id}: {e}")
 
     # 自定义模型
     if custom_model and _HAS_TRANSFORMERS:
@@ -119,7 +128,7 @@ def run_experiment(
     """运行 Statlog 实验。
 
     Args:
-        model_name:    注册表中的模型名 (stub / smollm2 / ...)
+        model_name:    注册表中的模型名 (stub / smollm2 / qwen2_5_7b / llama3_1_8b / ...)
         custom_model:  自定义 HuggingFace 模型路径（优先于 model_name）
         n_rounds:      在线运行轮次
         cold_start_n:  冷启动仿真上下文数量 (0=跳过)
@@ -269,7 +278,7 @@ def main():
         description="OurMethod on Statlog with Real Frozen LLM",
     )
     p.add_argument("--model", dest="model_name", type=str, default="stub",
-                   help="模型名 (stub/smollm2 或自定义)")
+                   help="模型名 (stub/smollm2/qwen2_5_7b/llama3_1_8b 或自定义)")
     p.add_argument("--custom_model", type=str, default=None,
                    help="自定义 HuggingFace 模型路径")
     p.add_argument("--n_rounds", type=int, default=2000)

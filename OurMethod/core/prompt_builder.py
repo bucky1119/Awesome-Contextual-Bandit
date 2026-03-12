@@ -129,7 +129,14 @@ class StructuredPromptBuilder(PromptBuilder):
             lines.append(f"Machine ID: {ctx.machine_id}")
         if ctx.env_fields:
             for k, v in sorted(ctx.env_fields.items()):
-                lines.append(f"{k}: {v}")
+                if k == "text":
+                    # For long texts, we can truncate to ensure prompt fits.
+                    text_str = str(v)
+                    if len(text_str) > 600:
+                        text_str = text_str[:600] + "..."
+                    lines.append(f"Text content: {text_str}")
+                else:
+                    lines.append(f"{k}: {v}")
         feats = ctx.features
         if self.feature_names and len(self.feature_names) == len(feats):
             for n, v in zip(self.feature_names, feats):

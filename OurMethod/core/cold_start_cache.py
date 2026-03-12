@@ -32,6 +32,8 @@
     all_h = data["all_h"]
     all_ds = data["all_ds"]
     # → 跳过冷启动，直接进入热启动训练 / 在线决策
+
+    TODO:命名应该改为仿真数据条数，而不是n的轮次
 """
 
 from __future__ import annotations
@@ -148,6 +150,8 @@ class ColdStartCache:
                         "arm_id": entry.arm_id,
                         "predicted_mean": float(entry.predicted_mean),
                         "predicted_std": float(entry.predicted_std),
+                        "reasoning": getattr(entry, "reasoning", ""),
+                        "raw_text": getattr(entry, "raw_text", ""),
                     }
                     for entry in ds_list
                 ])
@@ -221,6 +225,8 @@ class ColdStartCache:
                         arm_id=e["arm_id"],
                         predicted_mean=e["predicted_mean"],
                         predicted_std=e.get("predicted_std", 1.0),
+                        reasoning=e.get("reasoning", ""),
+                        raw_text=e.get("raw_text", "")
                     )
                     for e in ds_list_raw
                 ])

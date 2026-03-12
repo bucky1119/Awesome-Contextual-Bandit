@@ -85,16 +85,23 @@ def build_registry(model_name: str) -> FrozenLLMRegistry:
     reg = FrozenLLMRegistry()
     reg.register("stub", StubFrozenLLM(hidden_dim=128, generate_ds_llm=True))
 
-    if _HAS_TRANSFORMERS and model_name == "smollm2":
+    preset_models = {
+        "smollm2": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "qwen2_5_7b": "/home/csg/Awesome-contextual-bandits/models/huggingface/Qwen2.5-7B-Instruct",
+        "llama3_1_8b": "meta-llama/Llama-3.1-8B-Instruct",
+    }
+
+    if _HAS_TRANSFORMERS and model_name in preset_models:
+        model_id = preset_models[model_name]
         try:
-            print("[INFO] 加载 SmolLM2-360M-Instruct ...")
-            reg.register("smollm2", GenerativeFrozenLLM(
-                model_name="HuggingFaceTB/SmolLM2-360M-Instruct",
+            print(f"[INFO] 加载 {model_id} ...")
+            reg.register(model_name, GenerativeFrozenLLM(
+                model_name=model_id,
                 max_new_tokens=384, temperature=0.1,
                 use_chat_template=True, generate_ds_llm=True,
             ), default=True)
         except Exception as e:
-            print(f"[WARN] 无法加载 SmolLM2: {e}")
+            print(f"[WARN] 无法加载 {model_id}: {e}")
     return reg
 
 
@@ -219,7 +226,7 @@ def main():
     parser.add_argument("--dataset", type=str, default="statlog",
                         help="数据集名称: statlog")
     parser.add_argument("--model", type=str, default="stub",
-                        help="LLM 模型: stub | smollm2")
+                        help="LLM 模型: stub | smollm2 | qwen2_5_7b | llama3_1_8b")
     parser.add_argument("--cold_start_n", type=int, default=50,
                         help="冷启动上下文数量")
     parser.add_argument("--seed", type=int, default=42)

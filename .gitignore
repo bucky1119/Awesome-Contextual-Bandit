@@ -11,6 +11,8 @@ results/
 logs/
 *.log
 *.jsonl
+models/
+OurMethod/cold_start_data/
 
 # macOS
 .DS_Store

@@ -134,9 +134,13 @@ class DecisionRecord:
     optimal_reward: Optional[float] = None
     regret: Optional[float] = None
     ucb_values: Optional[List[float]] = None             # 各 arm 最终 score
+    ucb_s1: Optional[List[float]] = None
+    ucb_s2: Optional[List[float]] = None
+    ucb_s3: Optional[List[float]] = None
     radius_ucb1: Optional[List[float]] = None            # UCB1 半径
     radius_linucb: Optional[List[float]] = None          # LinUCB 半径
     radius_llm: Optional[List[float]] = None             # LLM 仿真半径
+    min_source: Optional[str] = None             # 记录当轮最小半径来源(s1,s2,s3)
     algorithm: str = ""
     timestamp: float = field(default_factory=time.time)
 
@@ -159,9 +163,13 @@ class DecisionRecord:
             "optimal_reward": self.optimal_reward,
             "regret":         self.regret,
             "ucb_values":     self.ucb_values,
+            "ucb_s1":         self.ucb_s1,
+            "ucb_s2":         self.ucb_s2,
+            "ucb_s3":         self.ucb_s3,
             "radius_ucb1":    self.radius_ucb1,
             "radius_linucb":  self.radius_linucb,
             "radius_llm":     self.radius_llm,
+            "min_source":     self.min_source,
             "algorithm":      self.algorithm,
             "timestamp":      self.timestamp,
         }
@@ -182,9 +190,13 @@ class DecisionRecord:
             optimal_reward=d.get("optimal_reward"),
             regret=d.get("regret"),
             ucb_values=d.get("ucb_values"),
+            ucb_s1=d.get("ucb_s1"),
+            ucb_s2=d.get("ucb_s2"),
+            ucb_s3=d.get("ucb_s3"),
             radius_ucb1=d.get("radius_ucb1"),
             radius_linucb=d.get("radius_linucb"),
             radius_llm=d.get("radius_llm"),
+            min_source=d.get("min_source"),
             algorithm=d.get("algorithm", ""),
             timestamp=d.get("timestamp", 0.0),
         )

@@ -21,7 +21,7 @@ _R = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _R not in sys.path:
     sys.path.insert(0, _R)
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import numpy as np
 
@@ -71,13 +71,13 @@ class ColdStartSimulator:
 
     def simulate(
         self,
-        contexts: List[np.ndarray],
+        contexts: List[Union[np.ndarray, Context]],
         verbose: bool = False,
     ) -> tuple:
         """对每个上下文调用冻结 LLM，返回 (ds_llm 列表, h_t 列表)。
 
         Args:
-            contexts: 特征向量列表，每个 shape (d,)
+            contexts: 特征向量列表 (np.ndarray) 或 Context 对象列表
             verbose:  是否打印进度
 
         Returns:
@@ -90,8 +90,11 @@ class ColdStartSimulator:
         t0 = time.time()
         n = len(contexts)
 
-        for i, feat in enumerate(contexts):
-            ctx = Context(features=feat)
+        for i, c in enumerate(contexts):
+            if isinstance(c, Context):
+                ctx = c
+            else:
+                ctx = Context(features=c)
             prompt = self.pb.build(ctx, self.arms)
             h_t, ds_llm = self.llm.encode(prompt, num_arms=len(self.arms))
             all_ds.append(ds_llm)
@@ -111,7 +114,7 @@ class ColdStartSimulator:
     def warmup_policy(
         self,
         policy,
-        contexts: List[np.ndarray],
+        contexts: List[Union[np.ndarray, Context]],
         verbose: bool = False,
     ) -> tuple:
         """用 LLM 预测预填充策略的 sim_stats。

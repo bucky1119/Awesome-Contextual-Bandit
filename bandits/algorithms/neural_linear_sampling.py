@@ -69,7 +69,11 @@ class NeuralLinearPosteriorSampling(BanditAlgorithm):
     try:
       # 为每个动作采样beta参数
       beta_s = [
-          np.random.multivariate_normal(self.mu[i], sigma2_s[i] * self.cov[i]) #多元高斯分布采样beta
+        np.random.multivariate_normal(
+          self.mu[i],
+          self._stable_covariance(sigma2_s[i] * self.cov[i]),
+          check_valid='ignore',
+        ) #多元高斯分布采样beta
           for i in range(self.hparams["num_actions"])
       ]
     except np.linalg.LinAlgError as e:
@@ -99,6 +103,18 @@ class NeuralLinearPosteriorSampling(BanditAlgorithm):
         np.dot(beta_s[i], z_context) for i in range(self.hparams["num_actions"]) #例如神经网络维度为100，beta_s[i]也是100维，点积得到动作i的值，z_context是context最后一层网络的表征，也是100维
     ]
     return int(np.argmax(vals)) #选择值最大的动作返回
+
+  def _stable_covariance(self, cov, eps=1e-8):
+    """Numerically stabilize covariance to be symmetric PSD."""
+    cov = np.asarray(cov, dtype=np.float64)
+    cov = 0.5 * (cov + cov.T)
+
+    # Project to PSD by clipping tiny negative eigenvalues caused by precision errors.
+    w, v = np.linalg.eigh(cov)
+    w = np.maximum(w, eps)
+    cov_psd = (v * w) @ v.T
+    cov_psd = 0.5 * (cov_psd + cov_psd.T)
+    return cov_psd
 
   def update(self, context, action, reward):
     """Updates the posterior using linear bayesian regression formula."""

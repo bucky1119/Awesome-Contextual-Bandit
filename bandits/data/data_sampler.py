@@ -18,6 +18,7 @@
 import numpy as np
 import pandas as pd
 from ucimlrepo import fetch_ucirepo
+from pandas.api.types import is_numeric_dtype
 
 
 def one_hot(df, cols):
@@ -56,7 +57,7 @@ def sample_mushroom_data(num_contexts,
     df = pd.concat([df, targets], axis=1)
     
     # One-hot encode categorical columns
-    categorical_columns = df.select_dtypes(include=['object']).columns
+    categorical_columns = df.select_dtypes(include=['object', 'string', 'category']).columns
     df = one_hot(df, categorical_columns)
     
     # Convert to numpy array and ensure float32 type
@@ -170,7 +171,7 @@ def sample_adult_data(num_contexts, shuffle_rows=True,
     data = pd.concat([features, targets], axis=1)
     
     # One-hot encode categorical columns
-    categorical_columns = data.select_dtypes(include=['object']).columns
+    categorical_columns = data.select_dtypes(include=['object', 'string', 'category']).columns
     data = one_hot(data, categorical_columns)
     
     # Convert to numpy array and ensure float32 type
@@ -205,7 +206,7 @@ def sample_census_data(num_contexts, shuffle_rows=True,
     data = pd.concat([features, targets], axis=1)
     
     # One-hot encode categorical columns
-    categorical_columns = data.select_dtypes(include=['object']).columns
+    categorical_columns = data.select_dtypes(include=['object', 'string', 'category']).columns
     data = one_hot(data, categorical_columns)
     
     # Convert to numpy array and ensure float32 type
@@ -258,16 +259,86 @@ def sample_covertype_data(num_contexts, shuffle_rows=True,
     num_actions = len(np.unique(labels))
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
+
+def sample_magic_data(num_contexts, shuffle_rows=True,
+                      remove_underrepresented=False):
+    """Returns bandit problem dataset based on the UCI MAGIC Gamma Telescope data."""
+    # MAGIC Gamma Telescope: UCI id=159
+    magic = fetch_ucirepo(id=159)
+    features = magic.data.features
+    targets = magic.data.targets
+
+    data = pd.concat([features, targets], axis=1)
+
+    # Encode non-numeric columns (including pandas StringDtype / Arrow string).
+    for c in data.columns:
+        if not is_numeric_dtype(data[c]):
+            data[c] = pd.factorize(data[c])[0]
+
+    data = data.astype(np.float32).values
+
+    if shuffle_rows:
+        np.random.shuffle(data)
+
+    if num_contexts > len(data):
+        num_contexts = len(data)
+    data = data[:num_contexts, :]
+
+    contexts = data[:, :-1]
+    labels = data[:, -1].astype(int)
+
+    if remove_underrepresented:
+        contexts, labels = remove_underrepresented_classes(contexts, labels)
+
+    num_actions = len(np.unique(labels))
+    return classification_to_bandit_problem(contexts, labels, num_actions)
+
+
+def sample_mnist_data(num_contexts, shuffle_rows=True,
+                      remove_underrepresented=False):
+    """Returns bandit problem dataset based on MNIST (OpenML mnist_784)."""
+    from sklearn.datasets import fetch_openml
+
+    X, y = fetch_openml("mnist_784", version=1, return_X_y=True, as_frame=False)
+    X = X.astype(np.float32)
+    labels = y.astype(int)
+
+    if shuffle_rows:
+        idx = np.random.permutation(len(X))
+        X = X[idx]
+        labels = labels[idx]
+
+    if num_contexts > len(X):
+        num_contexts = len(X)
+    X = X[:num_contexts]
+    labels = labels[:num_contexts]
+
+    if remove_underrepresented:
+        X, labels = remove_underrepresented_classes(X, labels)
+
+    num_actions = len(np.unique(labels))
+    return classification_to_bandit_problem(X, labels, num_actions)
+
 # 将分类数据转换为赌博机问题格式，奖励为0，1
 def classification_to_bandit_problem(contexts, labels, num_actions=None):
     """Converts classification data to bandit problem format."""
     n = contexts.shape[0] #样本数量
-    # 如果未指定动作数量，则根据标签自动确定动作数量
+    labels = np.asarray(labels)
+
+    # 将任意标签集合映射到连续的 0..K-1，避免原始标签从 1 开始或有空洞时越界。
+    unique_labels, normalized_labels = np.unique(labels, return_inverse=True)
+
+    # 如果未指定动作数量，则根据归一化后的标签数量自动确定动作数量
     if num_actions is None:
-        num_actions = np.max(labels) + 1
+        num_actions = len(unique_labels)
+    elif num_actions < len(unique_labels):
+        raise ValueError(
+            f"num_actions={num_actions} is smaller than number of unique labels={len(unique_labels)}"
+        )
+
     rewards = np.zeros((n, num_actions)) #初始化奖励矩阵，形状为 (样本数量, 动作数量)
-    rewards[np.arange(n), labels] = 1.0 #对于每个样本，正确类别的动作奖励设为1，其余为0
-    opt_actions = labels #最优动作即为正确类别标签
+    rewards[np.arange(n), normalized_labels] = 1.0 #对于每个样本，正确类别的动作奖励设为1，其余为0
+    opt_actions = normalized_labels #最优动作即为正确类别标签
     opt_rewards = np.ones(n) #最优奖励为1（因为正确类别的奖励为1）
     return np.hstack((contexts, rewards)), (opt_rewards, opt_actions)  # 返回数据集（横向拼接上下文和奖励矩阵）和（最优奖励、最优动作）
 
@@ -315,6 +386,43 @@ def sample_newsgroups_data(file_name, num_contexts, shuffle_rows=True):
         opt_rewards = opt_rewards[:num_contexts]
         opt_actions = opt_actions[:num_contexts]
 
+    return dataset, (opt_rewards, opt_actions)
+
+
+def sample_ag_news_data(file_name, num_contexts, shuffle_rows=True, return_texts=False):
+    """Returns bandit problem dataset based on the AG News data.
+
+    The .npz file is pre-built by prepare_ag_news.py and contains:
+      dataset      – (n, context_dim + num_actions)
+      opt_rewards  – (n,)
+      opt_actions  – (n,)
+      texts        - (n,) object array of strings
+    """
+    d = np.load(file_name, allow_pickle=True)
+    dataset = d['dataset'].astype(np.float32)
+    opt_rewards = d['opt_rewards'].astype(np.float32)
+    opt_actions = d['opt_actions'].astype(int)
+    texts = None
+    if 'texts' in d:
+        texts = d['texts']
+        
+    if shuffle_rows:
+        idx = np.random.permutation(len(dataset))
+        dataset = dataset[idx]
+        opt_rewards = opt_rewards[idx]
+        opt_actions = opt_actions[idx]
+        if texts is not None:
+            texts = texts[idx]
+
+    if num_contexts < len(dataset):
+        dataset = dataset[:num_contexts]
+        opt_rewards = opt_rewards[:num_contexts]
+        opt_actions = opt_actions[:num_contexts]
+        if texts is not None:
+            texts = texts[:num_contexts]
+
+    if return_texts:
+        return dataset, (opt_rewards, opt_actions), texts
     return dataset, (opt_rewards, opt_actions)
 
 

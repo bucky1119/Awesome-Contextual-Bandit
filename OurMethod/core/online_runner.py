@@ -151,6 +151,7 @@ class OnlineRunner:
                 radius_ucb1=debug.get("radius_ucb1"),
                 radius_linucb=debug.get("radius_linucb"),
                 radius_llm=debug.get("radius_llm"),
+                min_source=debug.get("min_source"),
                 algorithm=getattr(self.policy, "name", "combined_ucb"),
                 timestamp=time.time(),
             )

@@ -31,7 +31,7 @@ _R = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _R not in sys.path:
     sys.path.insert(0, _R)
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 
@@ -57,7 +57,9 @@ class CombinedUCBPolicy(Policy):
         lambda_reg: float = 1.0,
         initial_pulls: int = 1,
         name: str = "combined_ucb",
+        ablation_mode: str = "none",  # "none", "s1_only", "s2_only", "s3_only"
     ):
+        self.ablation_mode = ablation_mode
         # ============================================================ #
         #  参数指南 (Parameter Guide)
         # ============================================================ #
@@ -176,8 +178,15 @@ class CombinedUCBPolicy(Policy):
             ucb_s2_list.append(ucb_s2)
             ucb_s3_list.append(ucb_s3)
 
-            # ---- 取三个完整 UCB 的 min ---- #
-            scores[a] = min(ucb_s1, ucb_s2, ucb_s3)
+            # ---- 取三个完整 UCB 的 min，根据消融模式判断 ---- #
+            if self.ablation_mode == "s1_only":
+                scores[a] = ucb_s1
+            elif self.ablation_mode == "s2_only":
+                scores[a] = ucb_s2
+            elif self.ablation_mode == "s3_only":
+                scores[a] = ucb_s3
+            else:
+                scores[a] = min(ucb_s1, ucb_s2, ucb_s3)
 
         # 缓存调试信息供 runner / 日志读取
         self._last_ucb_values = scores.tolist()
@@ -187,8 +196,30 @@ class CombinedUCBPolicy(Policy):
         self._last_r_ucb1 = [self._radius_ucb1(a) for a in range(self.K)]
         self._last_r_linucb = [self._radius_linucb(a, z_t) for a in range(self.K)]
         self._last_r_llm = [self.sim_stats.radius_llm(a) for a in range(self.K)]
+        
+        best_arm = int(np.argmax(scores))
+        
+        # Determine the source of min for the best arm
+        best_s1 = ucb_s1_list[best_arm]
+        best_s2 = ucb_s2_list[best_arm]
+        best_s3 = ucb_s3_list[best_arm]
+        
+        if self.ablation_mode == "s1_only":
+            self._last_min_source = "s1"
+        elif self.ablation_mode == "s2_only":
+            self._last_min_source = "s2"
+        elif self.ablation_mode == "s3_only":
+            self._last_min_source = "s3"
+        else:
+            local_min = min(best_s1, best_s2, best_s3)
+            if local_min == best_s1:
+                self._last_min_source = "s1"
+            elif local_min == best_s2:
+                self._last_min_source = "s2"
+            else:
+                self._last_min_source = "s3"
 
-        return int(np.argmax(scores))
+        return best_arm
 
     def update(self, record: DecisionRecord):
         a = record.chosen_arm
@@ -225,7 +256,7 @@ class CombinedUCBPolicy(Policy):
     # ================================================================== #
     #  工具方法                                                           #
     # ================================================================== #
-    def get_last_debug(self) -> Dict[str, Optional[List[float]]]:
+    def get_last_debug(self) -> Dict[str, Any]:
         return {
             "ucb_values": getattr(self, "_last_ucb_values", None),
             "ucb_s1": getattr(self, "_last_ucb_s1", None),        # Neural LinUCB 完整 UCB
@@ -234,6 +265,7 @@ class CombinedUCBPolicy(Policy):
             "radius_ucb1": getattr(self, "_last_r_ucb1", None),
             "radius_linucb": getattr(self, "_last_r_linucb", None),
             "radius_llm": getattr(self, "_last_r_llm", None),
+            "min_source": getattr(self, "_last_min_source", None),
         }
 
     def get_theta(self, arm: int) -> np.ndarray:
