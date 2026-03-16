@@ -91,6 +91,7 @@ class NeuralLinearPosteriorSampling(BanditAlgorithm):
     # 通过unsqueeze(0)在最左侧新增一个长度为 1 的批量维度，满足 PyTorch 模型对批量输入的要求。
     # 1. 进入不计算梯度的上下文
     #这段代码是模型推理 / 特征提取阶段（不是训练阶段），不需要计算梯度（梯度仅用于训练时的反向传播更新参数）。
+    self.bnn.eval()
     with torch.no_grad():
       # 2. 模型前向传播（仅运行network的前n-1层），得到张量输出
       # 3. 将PyTorch张量转换为NumPy数组
@@ -116,12 +117,41 @@ class NeuralLinearPosteriorSampling(BanditAlgorithm):
     cov_psd = 0.5 * (cov_psd + cov_psd.T)
     return cov_psd
 
+  def _rebuild_blr_params(self):
+    """Rebuild all BLR posterior parameters from scratch using current latent representations.
+
+    Must be called after any update to latent_h.contexts (i.e., after NN retraining)
+    so that the posterior (μ, Σ, a, b) always lives in the same feature space as the
+    current network.  Calling this at other times is also fine — it is a full
+    batch recomputation, so the result is always exact.
+    """
+    for action_v in np.unique(self.latent_h.actions):
+      action_v = int(action_v)
+      z, y = self.latent_h.get_batch_for_action(action_v)
+      if len(z) == 0:
+        continue
+
+      s = np.dot(z.T, z)
+      precision_a = s + self._lambda_prior * np.eye(self.latent_dim)
+      cov_a = np.linalg.inv(precision_a)
+      mu_a = np.dot(cov_a, np.dot(z.T, y))
+      a_post = self._a0 + z.shape[0] / 2.0
+      b_upd = 0.5 * np.dot(y.T, y) - 0.5 * np.dot(mu_a.T, np.dot(precision_a, mu_a))
+      b_post = self._b0 + b_upd
+
+      self.mu[action_v] = mu_a
+      self.cov[action_v] = cov_a
+      self.precision[action_v] = precision_a
+      self.a[action_v] = a_post
+      self.b[action_v] = b_post
+
   def update(self, context, action, reward):
     """Updates the posterior using linear bayesian regression formula."""
 
     self.t += 1 #时间步加1
     self.data_h.add(context, action, reward) #将新的（context, action, reward）添加到原始数据集中
     context_tensor = torch.tensor(context, dtype=torch.float32).unsqueeze(0) #将上下文转换为张量并添加批次维度
+    self.bnn.eval()
     with torch.no_grad(): #不计算梯度
       z_context = self.bnn.network[:-1](context_tensor).numpy().squeeze(0) #计算上下文的最后一层表示
     self.latent_h.add(z_context, action, reward) #将新的（latent context, action, reward）添加到潜在表示数据集中
@@ -131,29 +161,21 @@ class NeuralLinearPosteriorSampling(BanditAlgorithm):
       self.bnn.train_model(self.data_h, self.num_epochs) #使用原始数据集训练神经网络
 
       # Update the latent representation of every datapoint collected so far
+      self.bnn.eval()
       all_contexts = self.data_h.contexts.numpy() #获取所有原始上下文数据
       with torch.no_grad():
         new_z = self.bnn.network[:-1](torch.tensor(all_contexts, dtype=torch.float32)).numpy() #计算所有上下文的最后一层表示
       self.latent_h.contexts = torch.tensor(new_z, dtype=torch.float32) #更新潜在表示数据集的上下文为新的表示
 
-    # Update the Bayesian Linear Regression
-    if self.t % self.update_freq_lr == 0:
-      # 更新贝叶斯线性回归模型
-      actions_to_update = self.latent_h.actions[:-self.update_freq_lr] if self.update_freq_lr < len(self.latent_h.actions) else self.latent_h.actions
-      for action_v in np.unique(actions_to_update):
-        z, y = self.latent_h.get_batch_for_action(action_v)
-        s = np.dot(z.T, z)
-        precision_a = s + self.lambda_prior * np.eye(self.latent_dim)
-        cov_a = np.linalg.inv(precision_a)
-        mu_a = np.dot(cov_a, np.dot(z.T, y))
-        a_post = self.a0 + z.shape[0] / 2.0
-        b_upd = 0.5 * np.dot(y.T, y) - 0.5 * np.dot(mu_a.T, np.dot(precision_a, mu_a))
-        b_post = self.b0 + b_upd
-        self.mu[action_v] = mu_a
-        self.cov[action_v] = cov_a
-        self.precision[action_v] = precision_a
-        self.a[action_v] = a_post
-        self.b[action_v] = b_post
+      # 关键：NN 重训后特征空间变化，必须立即重建 BLR 后验，使 action() 中的
+      # Thompson 采样与当前网络特征空间保持一致。
+      # （若两个频率相同，此处重建后 elif 分支不再重复执行，无额外开销。）
+      self._rebuild_blr_params()
+
+    # Update the Bayesian Linear Regression at its own scheduled frequency
+    # using elif to avoid redundant rebuild on steps where NN was also retrained.
+    elif self.t % self.update_freq_lr == 0:
+      self._rebuild_blr_params()
 
   @property
   def a0(self):

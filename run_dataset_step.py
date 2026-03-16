@@ -21,24 +21,37 @@
 """
 
 from __future__ import annotations
-import os
-import glob
-
 import argparse
+import glob
 import json
-import sys
-sys.path.insert(0, os.path.abspath("."))
-from OurMethod.extract_ucb import extract_ucb_stats
+import os
+import random as _random
 import re
 import sys
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Tuple
 
+sys.path.insert(0, os.path.abspath("."))
+from OurMethod.extract_ucb import extract_ucb_stats
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+def _set_all_seeds(seed: int) -> None:
+    """统一固定 random / numpy / torch 三类随机源，保证实验可复现。"""
+    _random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
@@ -63,6 +76,7 @@ from bandits.algorithms.linucb_sampling import LinUCBSampling
 from bandits.algorithms.epsilon_greedy_sampling import EpsilonGreedySampling
 from bandits.algorithms.neural_ucb_sampling import NeuralUCBSampling
 from bandits.algorithms.neural_linucb_sampling import NeuralLinUCBSampling
+from bandits.algorithms.Inl_ucb_sampling import InlUCBSampling
 
 RESULTS_DIR = os.path.join(ROOT, "results")
 
@@ -96,7 +110,7 @@ def load_newsgroups(n_rounds: int, cold_start_n: int, seed: int):
         print(f"[ERROR] {data_path} not found. Run prepare_newsgroups.py first.")
         sys.exit(1)
 
-    np.random.seed(seed)
+    _set_all_seeds(seed)
     total = n_rounds + cold_start_n
     dataset, (opt_r_all, opt_a_all) = sample_newsgroups_data(data_path, total, shuffle_rows=True)
 
@@ -121,7 +135,7 @@ def load_statlog(n_rounds: int, cold_start_n: int, seed: int):
         print(f"[ERROR] {data_path} not found.")
         sys.exit(1)
 
-    np.random.seed(seed)
+    _set_all_seeds(seed)
     total = n_rounds + cold_start_n
     dataset, (opt_r_all, opt_a_all) = sample_statlog_data(data_path, total, shuffle_rows=True)
 
@@ -146,7 +160,7 @@ def load_ag_news(n_rounds: int, cold_start_n: int, seed: int):
         print(f"[ERROR] {data_path} not found. Run prepare_ag_news.py first.")
         sys.exit(1)
 
-    np.random.seed(seed)
+    _set_all_seeds(seed)
     total = n_rounds + cold_start_n
     dataset, (opt_r_all, opt_a_all), texts = sample_ag_news_data(data_path, total, shuffle_rows=True, return_texts=True)
 
@@ -174,7 +188,7 @@ def _load_generic_uci(
     cold_start_n: int,
     seed: int,
 ):
-    np.random.seed(seed)
+    _set_all_seeds(seed)
     total = n_rounds + cold_start_n
     dataset, (opt_r_all, opt_a_all) = sampler(total, True)
 
@@ -261,9 +275,9 @@ def _b_neural_linear(num_actions: int, context_dim: int):
         "lambda_prior": 0.25,
         "a0": 6,
         "b0": 6,
-        "training_freq": 100,
-        "training_freq_network": 100,
-        "training_epochs": 100,
+        "training_freq": 50,
+        "training_freq_network": 50,
+        "training_epochs": 50,
         "initial_pulls": 2,
     }
     return NeuralLinearPosteriorSampling(h, name="neural_linear")
@@ -299,7 +313,8 @@ def _b_neural_ucb(num_actions: int, context_dim: int):
         "verbose": False,
         "lambda_prior": 1.0,
         "alpha": 1,
-        "training_freq": 50,
+        # "training_freq": 50,
+        "training_freq": 10,
         "training_epochs": 50,
     }
     return NeuralUCBSampling(h, name="neural_ucb")
@@ -319,21 +334,50 @@ def _b_neural_linucb(num_actions: int, context_dim: int):
         "layer_norm": False,
         "verbose": False,
         "lambda_prior": 1.0,
-        "alpha": 0.5,
-        "training_freq": 50,
+        "alpha": 1,
+        # "training_freq": 50,
+        "training_freq": 10,
         "training_epochs": 50,
     }
     return NeuralLinUCBSampling(h, name="neural_linucb")
 
 
+def _b_inlucb(num_actions: int, context_dim: int):
+    """InlUCB: Interconnected Neural-Linear UCB (Chen et al., 2022).
 
+    Alternates between:
+      - Online phase: fix f, run shared-linear UCB on latent features.
+      - Offline phase: fix theta, train f by MSE loss.
+    """
+    h = {
+        "context_dim": context_dim,
+        "num_actions": num_actions,
+        "layer_sizes": [100, 100],
+        "activation": "relu",
+        "initial_lr": 0.001,
+        "batch_size": 256,
+        "weight_decay": 1e-4,
+        "use_dropout": False,
+        "dropout_rate": 0.0,
+        "layer_norm": False,
+        "verbose": False,
+        "alpha": 1.0,
+        "lambda_prior": 1.0,
+        "online_horizon": 100,   # T steps per iteration before offline update
+        "offline_epochs": 50,    # epochs for offline representation learning
+        "initial_pulls": 2,
+    }
+    return InlUCBSampling(h, name="inlucb")
+
+
+register_baseline("epsilon_greedy", _b_epsilon_greedy)
 register_baseline("ucb1", _b_ucb1)
 register_baseline("linucb", _b_linucb)
-register_baseline("epsilon_greedy", _b_epsilon_greedy)
 register_baseline("neural_ucb", _b_neural_ucb)
 register_baseline("neural_linucb", _b_neural_linucb)
-register_baseline("neural_bandit", _b_neural_bandit)
+# register_baseline("neural_bandit", _b_neural_bandit)
 register_baseline("neural_linear", _b_neural_linear)
+# register_baseline("inlucb", _b_inlucb)
 
 BASELINE_NAMES = list(BASELINE_REGISTRY.keys())
 
@@ -350,14 +394,29 @@ def _ourmethod_stem(model_name: str) -> str:
     return f"ourmethod__{_sanitize_name(model_name)}"
 
 
-def _exp_dir(dataset_name: str, n_rounds: int, seed: int) -> str:
-    d = os.path.join(RESULTS_DIR, f"{dataset_name}_{n_rounds}r_seed{seed}")
+def _exp_dir(dataset_name: str, n_rounds: int, seed: int, timestamp: str | None = None) -> str:
+    if timestamp:
+        folder = f"{timestamp}_{dataset_name}_{n_rounds}r_seed{seed}"
+    else:
+        folder = f"{dataset_name}_{n_rounds}r_seed{seed}"
+    d = os.path.join(RESULTS_DIR, folder)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def save_algo_log(dataset_name: str, algo_stem: str, data: dict, n_rounds: int, seed: int, meta: Dict[str, Any] | None = None):
-    exp_d = _exp_dir(dataset_name, n_rounds, seed)
+def _find_all_exp_dirs(dataset_name: str, n_rounds: int, seed: int) -> List[str]:
+    """返回所有与该实验参数匹配的结果子目录（新格式含时间戳前缀 + 旧格式兼容）。"""
+    suffix = f"{dataset_name}_{n_rounds}r_seed{seed}"
+    dirs = glob.glob(os.path.join(RESULTS_DIR, f"*_{suffix}"))
+    # 兼容旧格式（无时间戳前缀）
+    exact = os.path.join(RESULTS_DIR, suffix)
+    if os.path.isdir(exact):
+        dirs.append(exact)
+    return dirs
+
+
+def save_algo_log(dataset_name: str, algo_stem: str, data: dict, n_rounds: int, seed: int, meta: Dict[str, Any] | None = None, timestamp: str | None = None):
+    exp_d = _exp_dir(dataset_name, n_rounds, seed, timestamp=timestamp)
     fp = os.path.join(exp_d, f"{algo_stem}.npz")
 
     payload = {
@@ -404,21 +463,19 @@ def save_algo_log(dataset_name: str, algo_stem: str, data: dict, n_rounds: int, 
 
 
 def load_algo_log(dataset_name: str, algo_stem: str, n_rounds: int, seed: int) -> dict | None:
-    exp_d = _exp_dir(dataset_name, n_rounds, seed)
-    
-    # Support timestamp prefixes (e.g. 20260306_123456_my_algo.npz)
-    pattern = os.path.join(exp_d, f"*_{algo_stem}.npz")
-    matches = glob.glob(pattern)
-    
-    # Also check exact match
-    fp_exact = os.path.join(exp_d, f"{algo_stem}.npz")
-    if os.path.exists(fp_exact):
-        matches.append(fp_exact)
-        
+    # 在所有匹配该实验参数的目录下搜索（支持新格式时间戳前缀和旧格式）
+    candidate_dirs = _find_all_exp_dirs(dataset_name, n_rounds, seed)
+    matches = []
+    for d in candidate_dirs:
+        matches.extend(glob.glob(os.path.join(d, f"*_{algo_stem}.npz")))
+        fp_exact = os.path.join(d, f"{algo_stem}.npz")
+        if os.path.exists(fp_exact):
+            matches.append(fp_exact)
+
     if not matches:
         return None
-        
-    # Get the latest edited file
+
+    # 取修改时间最新的文件
     fp = sorted(matches, key=os.path.getmtime)[-1]
     
     d = np.load(fp, allow_pickle=True)
@@ -479,13 +536,14 @@ def run_one_baseline(algo, algo_name, cmab, offset, n_rounds, opt_rewards, opt_a
 # ====================================================================== #
 
 STYLES = {
+    "epsilon_greedy": {"color": "#9467bd", "ls": "--", "lw": 1.2},
     "ucb1": {"color": "#2ca02c", "ls": "--", "lw": 1.2},
     "linucb": {"color": "#d62728", "ls": "--", "lw": 1.2},
-    "epsilon_greedy": {"color": "#9467bd", "ls": "--", "lw": 1.2},
     "neural_ucb": {"color": "#8c564b", "ls": "-.", "lw": 1.5},
     "neural_linucb": {"color": "#e377c2", "ls": "-.", "lw": 1.5},
     "neural_bandit": {"color": "#1f77b4", "ls": "-", "lw": 1.5},
     "neural_linear": {"color": "#ff7f0e", "ls": "-", "lw": 1.5},
+    "inlucb": {"color": "#bcbd22", "ls": "-", "lw": 2.0},
     "combined_ucb": {"color": "#17becf", "ls": "-", "lw": 2.5},
 }
 
@@ -526,11 +584,12 @@ def print_summary(all_data: Dict[str, dict], n_rounds: int):
         print(f"{name:<28s} {cr:>12.1f} {avg_r:>12.4f} {acc:>10.4f}")
     print(f"{'=' * 78}")
 
-def plot_cumulative_reward(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None):
+def plot_cumulative_reward(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None, exp_d: str = None):
     ensure_plot_compatible(all_data)
 
-    # Use the original experiment rounds (save_rounds) for folder saving if provided, otherwise fallback to n_rounds
-    exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
+    # Use provided exp_d, or fall back to deriving from save_rounds/n_rounds
+    if exp_d is None:
+        exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
     steps = np.arange(1, n_rounds + 1)
     fig, ax = plt.subplots(figsize=(12, 7))
 
@@ -553,52 +612,35 @@ def plot_cumulative_reward(dataset_name: str, all_data: Dict[str, dict], n_round
     return fp
 
 
-def plot_average_reward(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None):
+def plot_average_reward(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None, exp_d: str = None):
 
     ensure_plot_compatible(all_data)
-
-    exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
-
+    if exp_d is None:
+        exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
     steps = np.arange(1, n_rounds + 1)
-
     fig, ax = plt.subplots(figsize=(12, 7))
-
     for name, data in all_data.items():
-
         s = _style_for(name)
-
         # 同样逐点绘制平均奖励 (平滑版: 当前累积/时间步)
-
         avg_rewards = data["cumulative_reward"] / steps
-
         ax.plot(steps, avg_rewards, label=name, **s)
-
     ax.set_xlabel("Time Step", fontsize=13)
-
     ax.set_ylabel("Cumulative Average Reward", fontsize=13)
-
     ax.set_title(f"{dataset_name} — Average Reward ({n_rounds}r, seed={seed})", fontsize=14, fontweight="bold")
-
     ax.legend(fontsize=10)
-
     ax.grid(True, alpha=0.3)
-
     fig.tight_layout()
-
     fp = os.path.join(exp_d, f"{tag}_avg_reward.png")
-
     fig.savefig(fp, dpi=300, bbox_inches="tight")
-
     plt.close(fig)
-
     print(f"  Plot saved: {fp}")
-
     return fp
 
-def plot_regret(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None):
+def plot_regret(dataset_name: str, all_data: Dict[str, dict], n_rounds: int, seed: int, tag: str, save_rounds: int = None, exp_d: str = None):
     ensure_plot_compatible(all_data)
 
-    exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
+    if exp_d is None:
+        exp_d = _exp_dir(dataset_name, save_rounds if save_rounds else n_rounds, seed)
     steps = np.arange(1, n_rounds + 1)
     fig, ax = plt.subplots(figsize=(12, 7))
 
@@ -692,7 +734,7 @@ def cmd_baselines(args):
 
             print(f"  Running {bname} ...")
             t_start = time.time()
-            np.random.seed(seed)
+            _set_all_seeds(seed)
             algo = BASELINE_REGISTRY[bname](num_actions, context_dim)
             result = run_one_baseline(
                 algo, bname, cmab, offset=cold_start_n,
@@ -713,13 +755,14 @@ def cmd_baselines(args):
             }
             # 使用时间戳作为命名前缀
             record_stem = f"{run_timestamp}_{bname}"
-            save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta)
+            save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta, timestamp=run_timestamp)
             all_data[bname] = result
 
         if all_data:
             print_summary(all_data, n_rounds)
             tag = f"{run_timestamp}_baselines_" + _sanitize_name("_".join(baselines))
-            plot_regret(dname, all_data, n_rounds, seed, tag=tag)
+            run_exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
+            plot_regret(dname, all_data, n_rounds, seed, tag=tag, exp_d=run_exp_d)
 
             summary = {
                 "meta": {
@@ -740,7 +783,7 @@ def cmd_baselines(args):
                     for name, data in all_data.items()
                 },
             }
-            fp = os.path.join(_exp_dir(dname, n_rounds, seed), f"{run_timestamp}_baselines_summary.json")
+            fp = os.path.join(run_exp_d, f"{run_timestamp}_baselines_summary.json")
             with open(fp, "w") as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
             print(f"  Summary saved: {fp}")
@@ -905,7 +948,7 @@ def cmd_ourmethod(args):
                 max_feature_display=24,
             )
 
-        np.random.seed(seed)
+        _set_all_seeds(seed)
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         result = run_our_method_pipeline(
@@ -954,7 +997,7 @@ def cmd_ourmethod(args):
         }
         record_stem = f"{run_timestamp}_{our_stem}"
 
-        save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta)
+        save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta, timestamp=run_timestamp)
         print(
             f"  OurMethod[{model_for_name}] cum_regret={result['cumulative_regret'][-1]:.1f}  "
             f"avg_reward={np.mean(result['rewards']):.4f}"
@@ -962,7 +1005,7 @@ def cmd_ourmethod(args):
 
         # Generate separate OurMethod Summary Report
         try:
-            exp_d = _exp_dir(dname, n_rounds, seed)
+            exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
             report_path = os.path.join(exp_d, f"{record_stem}_run_report.md")
             history = result.get("history", [])
             if history:
@@ -1053,7 +1096,7 @@ def cmd_ourmethod(args):
                 "times": result.get("times", {}),
             },
         }
-        fp = os.path.join(_exp_dir(dname, n_rounds, seed), f"{record_stem}_summary.json")
+        fp = os.path.join(_exp_dir(dname, n_rounds, seed, timestamp=run_timestamp), f"{record_stem}_summary.json")
         with open(fp, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         print(f"  Summary saved: {fp}")
@@ -1116,11 +1159,16 @@ def cmd_plot(args):
 
         run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         tag = f"{run_timestamp}_plot_" + _sanitize_name("_".join(stems))
-        
+
+        # 读取数据所在的目录作为 plot 输出目录，保证 plot 和数据放在一起
+        plot_exp_d = os.path.dirname(list(loaded.values())[0].get("__file__", ""))
+        if not plot_exp_d or not os.path.isdir(plot_exp_d):
+            plot_exp_d = _exp_dir(dname, n_rounds, seed)
+
         # Pass actual_plot_rounds to limit the x-axis properly, but pass n_rounds for the directory lookup
-        plot_regret(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds)
-        plot_cumulative_reward(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds)
-        plot_average_reward(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds)
+        plot_regret(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds, exp_d=plot_exp_d)
+        plot_cumulative_reward(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds, exp_d=plot_exp_d)
+        plot_average_reward(dname, loaded, actual_plot_rounds, seed, tag=tag, save_rounds=n_rounds, exp_d=plot_exp_d)
 
         summary = {
             "meta": {
@@ -1141,7 +1189,7 @@ def cmd_plot(args):
                 for name, data in loaded.items()
             },
         }
-        fp = os.path.join(_exp_dir(dname, n_rounds, seed), f"{tag}_summary.json")
+        fp = os.path.join(plot_exp_d, f"{tag}_summary.json")
         with open(fp, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         print(f"  Plot summary saved: {fp}")

@@ -58,11 +58,11 @@ class NeuralBanditModel(BayesianNeuralNetwork):
         self.layer_sizes = hparams.get("layer_sizes", [100, 100]) #隐藏层大小列表
         self.activation = hparams.get("activation", "relu") #激活函数类型
         self.learning_rate = hparams.get("initial_lr", 0.001) #学习率
-        self.batch_size = hparams.get("batch_size", 512) #批量大小
+        self.batch_size = hparams.get("batch_size", 50) #批量大小，neural_ucb论文好像是默认50
         self.init_scale = hparams.get("init_scale", 0.3) #权重初始化范围
         self.use_dropout = hparams.get("use_dropout", False) #是否使用dropout
         self.dropout_rate = hparams.get("dropout_rate", 0.1) #dropout概率
-        self.layer_norm = hparams.get("layer_norm", False) #是否使用层归一化
+        self.layer_norm = hparams.get("layer_norm", True) #是否使用层归一化
         
         self.build_model() #构建神经网络模型
 
@@ -152,10 +152,13 @@ class NeuralBanditModel(BayesianNeuralNetwork):
         targets = torch.zeros_like(predictions)
         targets.scatter_(1, actions.unsqueeze(1), rewards.unsqueeze(1))
         
-        # Compute loss (only for observed actions)
+        # Compute loss (only for observed actions).
+        # Use action-based mask instead of (targets != 0) to correctly handle
+        # zero rewards, which would otherwise be silently dropped.
+        action_mask = torch.zeros_like(predictions)
+        action_mask.scatter_(1, actions.unsqueeze(1), 1.0)
         loss = F.mse_loss(predictions, targets, reduction='none')
-        mask = (targets != 0).float()
-        weighted_loss = (loss * mask).sum() / mask.sum()
+        weighted_loss = (loss * action_mask).sum() / action_mask.sum()
         
         # Backward pass
         weighted_loss.backward()
@@ -184,9 +187,13 @@ class NeuralBanditModel(BayesianNeuralNetwork):
             
             for idx in batch_indices:
                 context, reward = data[idx]
-                action = np.random.randint(0, self.num_actions)  # Placeholder
+                # 使用数据集中记录的实际采取动作，而非随机动作
+                if data.actions and idx < len(data.actions):
+                    action = data.actions[idx]
+                else:
+                    action = np.random.randint(0, self.num_actions)
                 contexts_batch.append(context)
-                # Always extract the reward for the chosen action as a float
+                # 提取该动作对应的实际奖励
                 if isinstance(reward, torch.Tensor):
                     if reward.dim() > 0:
                         reward_val = reward[action].item()
@@ -208,6 +215,7 @@ class NeuralBanditModel(BayesianNeuralNetwork):
             if self.verbose and step % 100 == 0:
                 print(f"Step {step}, Loss: {loss:.4f}")
         
+        self.eval()  # Restore eval mode after training
         self.times_trained += 1
     
     def predict(self, contexts: torch.Tensor) -> torch.Tensor:

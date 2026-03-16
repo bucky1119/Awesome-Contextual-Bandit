@@ -57,8 +57,10 @@ class LinUCBSampling(BanditAlgorithm):
     self.num_actions = hparams.num_actions
     self.context_dim = hparams.context_dim
     self.alpha = getattr(hparams, 'alpha', 1.0)  # 探索系数
-    self._lambda_prior = getattr(hparams, 'lambda_prior', 1.0)  # 岭回归正则化参数
-
+    self._lambda_prior = getattr(hparams, 'lambda_prior', 1.0)  # 岭回归正则化参数    # 初始轮询次数：保证每个 arm 至少被测试 initial_pulls 次。
+    # 无此阶段时 t=0 所有 UCB 值相等，np.argmax 始终返回 arm 0，
+    # 若 arm 0 早期奖励估计较高则其余 arm 长期得不到探索，有限轮次遗憾上界退化。
+    self.initial_pulls = getattr(hparams, 'initial_pulls', 2)
     # 维度包含截距项
     self.d = self.context_dim + 1
 
@@ -90,6 +92,10 @@ class LinUCBSampling(BanditAlgorithm):
     Returns:
       action: Selected action index.
     """
+
+    # 初始阶段：轮流选择每个 arm，确保每个 arm 至少被观测 initial_pulls 次
+    if self.t < self.num_actions * self.initial_pulls:
+      return self.t % self.num_actions
 
     x = self._add_intercept(context)  # 扩展上下文向量，加入截距项
 

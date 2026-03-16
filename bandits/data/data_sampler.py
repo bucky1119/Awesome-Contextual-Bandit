@@ -15,10 +15,35 @@
 
 """Functions to create bandit problems from datasets (PyTorch/NumPy version)."""
 
+import os
 import numpy as np
 import pandas as pd
 from ucimlrepo import fetch_ucirepo
 from pandas.api.types import is_numeric_dtype
+
+# 本文件位于 bandits/data/，向上三级才是项目根目录
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DATASETS_DIR = os.path.join(_REPO_ROOT, "datasets")
+
+
+def _load_bandit_npz(file_name: str, num_contexts: int, shuffle_rows: bool):
+    """从 bandit 格式的 .npz 文件加载数据并返回标准格式。
+
+    返回: (dataset, (opt_rewards, opt_actions))
+    """
+    raw = np.load(file_name)
+    dataset = raw["dataset"].astype(np.float32)  # (n, context_dim + num_actions)
+    opt_rewards = raw["opt_rewards"].astype(np.float32)
+    opt_actions = raw["opt_actions"].astype(int)
+
+    if shuffle_rows:
+        idx = np.random.permutation(len(dataset))
+        dataset = dataset[idx]
+        opt_rewards = opt_rewards[idx]
+        opt_actions = opt_actions[idx]
+
+    n = min(num_contexts, len(dataset))
+    return dataset[:n], (opt_rewards[:n], opt_actions[:n])
 
 
 def one_hot(df, cols):
@@ -231,74 +256,79 @@ def sample_census_data(num_contexts, shuffle_rows=True,
 
 def sample_covertype_data(num_contexts, shuffle_rows=True,
                           remove_underrepresented=False):
-    """Returns bandit problem dataset based on the UCI covertype data using ucimlrepo."""
-    # Fetch covertype dataset from UCI
+    """Returns bandit problem dataset based on the UCI covertype data.
+    优先从本地 datasets/covertype.npz 加载，如小有缺则从 UCI 在线拉取。
+    """
+    local_npz = os.path.join(_DATASETS_DIR, "covertype.npz")
+    if os.path.exists(local_npz):
+        return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
+
+    # 备用：在线拉取
     covertype = fetch_ucirepo(id=31)
     features = covertype.data.features
     targets = covertype.data.targets
-    
-    # Combine features and targets
     data = pd.concat([features, targets], axis=1)
-    
-    # Convert to numpy array
     data = data.values
-    
+
     if shuffle_rows:
         np.random.shuffle(data)
-    
     if num_contexts > len(data):
         num_contexts = len(data)
     data = data[:num_contexts, :]
-    
+
     contexts = data[:, :-1]
     labels = data[:, -1].astype(int)
-    
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
-    
     num_actions = len(np.unique(labels))
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
 def sample_magic_data(num_contexts, shuffle_rows=True,
                       remove_underrepresented=False):
-    """Returns bandit problem dataset based on the UCI MAGIC Gamma Telescope data."""
-    # MAGIC Gamma Telescope: UCI id=159
+    """Returns bandit problem dataset based on the UCI MAGIC Gamma Telescope data.
+    优先从本地 datasets/magic.npz 加载，如小有缺则从 UCI 在线拉取。
+    """
+    local_npz = os.path.join(_DATASETS_DIR, "magic.npz")
+    if os.path.exists(local_npz):
+        return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
+
+    # 备用：在线拉取
     magic = fetch_ucirepo(id=159)
     features = magic.data.features
     targets = magic.data.targets
 
     data = pd.concat([features, targets], axis=1)
-
-    # Encode non-numeric columns (including pandas StringDtype / Arrow string).
     for c in data.columns:
         if not is_numeric_dtype(data[c]):
             data[c] = pd.factorize(data[c])[0]
-
     data = data.astype(np.float32).values
 
     if shuffle_rows:
         np.random.shuffle(data)
-
     if num_contexts > len(data):
         num_contexts = len(data)
     data = data[:num_contexts, :]
 
     contexts = data[:, :-1]
     labels = data[:, -1].astype(int)
-
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
-
     num_actions = len(np.unique(labels))
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
 def sample_mnist_data(num_contexts, shuffle_rows=True,
                       remove_underrepresented=False):
-    """Returns bandit problem dataset based on MNIST (OpenML mnist_784)."""
-    from sklearn.datasets import fetch_openml
+    """Returns bandit problem dataset based on MNIST (OpenML mnist_784).
+    优先从本地 datasets/mnist.npz 加载，如小有缺则从 OpenML 在线拉取。
+    """
+    local_npz = os.path.join(_DATASETS_DIR, "mnist.npz")
+    if os.path.exists(local_npz):
+        return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
 
+    # 备用：在线拉取
+    from sklearn.datasets import fetch_openml
     X, y = fetch_openml("mnist_784", version=1, return_X_y=True, as_frame=False)
     X = X.astype(np.float32)
     labels = y.astype(int)
@@ -307,7 +337,6 @@ def sample_mnist_data(num_contexts, shuffle_rows=True,
         idx = np.random.permutation(len(X))
         X = X[idx]
         labels = labels[idx]
-
     if num_contexts > len(X):
         num_contexts = len(X)
     X = X[:num_contexts]
@@ -315,7 +344,6 @@ def sample_mnist_data(num_contexts, shuffle_rows=True,
 
     if remove_underrepresented:
         X, labels = remove_underrepresented_classes(X, labels)
-
     num_actions = len(np.unique(labels))
     return classification_to_bandit_problem(X, labels, num_actions)
 

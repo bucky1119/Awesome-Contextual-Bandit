@@ -1,0 +1,41 @@
+{
+  "name": "20 Newsgroups",
+  "source": "sklearn.datasets.fetch_20newsgroups",
+  "url": "http://qwone.com/~jason/20Newsgroups/",
+  "task": "20-class text classification (newsgroup topics)",
+  "classes": [
+    "alt.atheism",
+    "comp.graphics",
+    "comp.os.ms-windows.misc",
+    "comp.sys.ibm.pc.hardware",
+    "comp.sys.mac.hardware",
+    "comp.windows.x",
+    "misc.forsale",
+    "rec.autos",
+    "rec.motorcycles",
+    "rec.sport.baseball",
+    "rec.sport.hockey",
+    "sci.crypt",
+    "sci.electronics",
+    "sci.med",
+    "sci.space",
+    "soc.religion.christian",
+    "talk.politics.guns",
+    "talk.politics.mideast",
+    "talk.politics.misc",
+    "talk.religion.misc"
+  ],
+  "columns": [
+    "text",
+    "label",
+    "category"
+  ],
+  "total_samples": 18846,
+  "splits": {
+    "train": 11314,
+    "test": 7532
+  },
+  "format": "csv",
+  "note": "remove=() — headers/footers/quotes preserved",
+  "downloaded": "2026-03-12"
+}

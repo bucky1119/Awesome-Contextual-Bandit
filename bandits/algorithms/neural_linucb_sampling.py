@@ -83,7 +83,7 @@ class NeuralLinUCBSampling(BanditAlgorithm):
     self.alpha = hparams.get("alpha", 1.0)  # UCB 探索系数
     self._lambda_prior = hparams.get("lambda_prior", 0.25)  # 岭回归正则化参数
     self.update_freq_lr = hparams.get("training_freq", 100)  # 线性回归更新频率
-    self.update_freq_nn = hparams.get("training_freq_network", 100)  # NN 训练频率
+    self.update_freq_nn = hparams.get("training_freq_network", 50)  # NN 训练频率
     self.num_epochs = hparams.get("training_epochs", 100)  # NN 训练轮数
     self.initial_pulls = hparams.get("initial_pulls", 2)  # 初始轮询次数
     self.t = 0  # 全局时间步
@@ -122,6 +122,7 @@ class NeuralLinUCBSampling(BanditAlgorithm):
       return self.t % self.num_actions
 
     # 计算当前上下文的最后一层表示
+    self.bnn.eval()
     context_tensor = torch.tensor(context, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
       z_context = self.bnn.network[:-1](context_tensor).numpy().squeeze(0)  # 排除最后一层输出层
@@ -150,6 +151,7 @@ class NeuralLinUCBSampling(BanditAlgorithm):
     self.data_h.add(context, action, reward)
 
     # 计算当前上下文的潜在表示
+    self.bnn.eval()
     context_tensor = torch.tensor(context, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
       z_context = self.bnn.network[:-1](context_tensor).numpy().squeeze(0)
@@ -168,6 +170,7 @@ class NeuralLinUCBSampling(BanditAlgorithm):
       self.bnn.train_model(self.data_h, self.num_epochs)
 
       # 重训后刷新所有潜在表示
+      self.bnn.eval()
       all_contexts = self.data_h.contexts.numpy()
       with torch.no_grad():
         new_z = self.bnn.network[:-1](

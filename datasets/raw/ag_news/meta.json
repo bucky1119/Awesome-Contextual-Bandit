@@ -1,0 +1,23 @@
+{
+  "name": "AG News",
+  "source": "HuggingFace fancyzhx/ag_news",
+  "url": "https://huggingface.co/datasets/fancyzhx/ag_news",
+  "task": "4-class text classification (World / Sports / Business / Sci/Tech)",
+  "classes": [
+    "World",
+    "Sports",
+    "Business",
+    "Sci/Tech"
+  ],
+  "columns": [
+    "text",
+    "label"
+  ],
+  "total_samples": 127600,
+  "splits": {
+    "test": 7600,
+    "train": 120000
+  },
+  "format": "parquet (data/ subdirectory)",
+  "downloaded": "2026-03-12"
+}
