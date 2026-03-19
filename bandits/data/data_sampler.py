@@ -15,11 +15,90 @@
 
 """Functions to create bandit problems from datasets (PyTorch/NumPy version)."""
 
+# ============================================================================
+# 文件说明（详细版：输入 / 输出 / 功能）
+#
+# 一、这个文件解决什么问题
+# - 将多种来源的数据（UCI、本地 .npz、文本向量化结果等）统一转换为“上下文 Bandit”可直接使用的标准格式。
+# - 标准格式通常为：
+#   dataset: [n, context_dim + num_actions]
+#   其中前 context_dim 列是上下文特征，后 num_actions 列是每个动作的奖励。
+# - 同时输出离线最优信息：
+#   (opt_rewards, opt_actions)
+#   - opt_rewards: 每个样本在最优动作下的奖励（或期望奖励）
+#   - opt_actions: 每个样本的最优动作索引
+#
+# 二、全局输入来源
+# - 本地文件输入：
+#   - .npz（如 datasets/covertype.npz、mnist.npz、magic.npz、newsgroups.npz 等）
+#   - .txt/.csv（如 stock、statlog 原始文件）
+# - 在线数据输入：
+#   - UCI 数据集（通过 ucimlrepo 拉取）
+#   - OpenML 的 MNIST（作为本地缺失时的兜底来源）
+# - 采样与预处理控制参数：
+#   - num_contexts: 采样样本数
+#   - shuffle_rows / shuffle_cols: 是否打乱行/列
+#   - remove_underrepresented: 是否移除低频类别
+#   - 任务特定参数（如 mushroom 奖励参数、stock 噪声 sigma 等）
+#
+# 三、统一输出约定
+# - 大多数 sample_xxx_data(...) 函数返回：
+#   (dataset, (opt_rewards, opt_actions))
+# - 个别函数（如 sample_ag_news_data）在 return_texts=True 时额外返回文本：
+#   (dataset, (opt_rewards, opt_actions), texts)
+# - classification_to_bandit_problem(...) 返回分类转 Bandit 的标准表示：
+#   dataset = [contexts | rewards(one-hot)]
+#   以及 (opt_rewards=1 向量, opt_actions=真实类别映射后的索引)
+#
+# 四、关键函数的输入输出与职责
+# 1) _load_bandit_npz(file_name, num_contexts, shuffle_rows)
+#    输入：本地 bandit 格式 .npz 路径与采样参数
+#    输出：截断/打乱后的 dataset 与 (opt_rewards, opt_actions)
+#    职责：统一读取已加工好的 bandit 数据文件
+#
+# 2) one_hot(df, cols)
+#    输入：DataFrame 与待 one-hot 的列名列表
+#    输出：完成 one-hot 后的新 DataFrame
+#    职责：把类别特征转为数值特征，便于后续模型训练
+#
+# 3) classification_to_bandit_problem(contexts, labels, num_actions=None)
+#    输入：
+#    - contexts: [n, d]
+#    - labels: 任意标签集合（可不连续、可不从 0 开始）
+#    - num_actions: 可选，动作数上限/指定值
+#    输出：
+#    - dataset: [n, d + K]，后 K 列为 one-hot 奖励
+#    - (opt_rewards, opt_actions)
+#    职责：将“分类问题”统一映射为“Bandit 奖励矩阵问题”
+#
+# 4) remove_underrepresented_classes(features, labels, thresh)
+#    输入：特征、标签、类别占比阈值
+#    输出：过滤后的 features 与 labels
+#    职责：移除极少样本类别，缓解训练不稳定与极端不平衡
+#
+# 5) sample_xxx_data(...) 系列函数
+#    输入：各数据集路径或拉取参数 + 采样/预处理参数
+#    输出：统一的 bandit 数据格式
+#    职责：
+#    - 对接不同数据源
+#    - 进行编码/清洗/抽样
+#    - 产出算法可直接消费的离线 Bandit 数据
+#
+# 五、设计特点
+# - 同时支持“本地优先、在线兜底”的数据加载策略（提高可复现性与可用性）。
+# - 对分类标签做归一化映射（0..K-1），避免原始标签空洞导致索引越界。
+# - 输出结构在全项目中保持一致，方便训练、评估、可视化模块复用。
+# ============================================================================
+
 import os
+import io
+import subprocess
+import glob
 import numpy as np
 import pandas as pd
 from ucimlrepo import fetch_ucirepo
 from pandas.api.types import is_numeric_dtype
+from sklearn.preprocessing import StandardScaler
 
 # 本文件位于 bandits/data/，向上三级才是项目根目录
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,6 +123,36 @@ def _load_bandit_npz(file_name: str, num_contexts: int, shuffle_rows: bool):
 
     n = min(num_contexts, len(dataset))
     return dataset[:n], (opt_rewards[:n], opt_actions[:n])
+
+
+def _load_gzip_csv(file_name: str, delimiter: str = ",") -> np.ndarray:
+    """Load a gzip-compressed delimited numeric file into a float32 array."""
+    with subprocess.Popen(["gzip", "-dc", file_name], stdout=subprocess.PIPE, text=True) as proc:
+        if proc.stdout is None:
+            raise ValueError(f"Unable to read compressed file: {file_name}")
+        data = np.loadtxt(proc.stdout, delimiter=delimiter, dtype=np.float32)
+        return data
+
+
+def _load_mnist_parquet_as_arrays(parquet_files: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """Load HuggingFace-style MNIST parquet files into (X, y)."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError("Pillow is required to read local MNIST parquet image bytes.") from exc
+
+    frames = [pd.read_parquet(file_name) for file_name in parquet_files]
+    df = pd.concat(frames, ignore_index=True)
+
+    contexts = []
+    for image_obj in df["image"]:
+        if not isinstance(image_obj, dict) or "bytes" not in image_obj:
+            raise ValueError("Unexpected MNIST parquet image format; expected dict with 'bytes'.")
+        image = Image.open(io.BytesIO(image_obj["bytes"]))
+        contexts.append(np.asarray(image, dtype=np.float32).reshape(-1))
+
+    labels = df["label"].to_numpy(dtype=np.int64)
+    return np.vstack(contexts), labels
 
 
 def one_hot(df, cols):
@@ -164,24 +273,49 @@ def sample_jester_data(file_name, context_dim, num_actions, num_contexts,
     return dataset, (opt_rewards, opt_actions)
 
 
+# def sample_statlog_data(file_name, num_contexts, shuffle_rows=True,
+#                         remove_underrepresented=False):
+#     """Returns bandit problem dataset based on the UCI statlog data."""
+#     data = np.loadtxt(file_name)
+#     # 假设 file_name = "statlog.txt"
+#     # 数据格式: 每行 = [特征1, 特征2, ..., 特征9, 标签]
+#     # 前面的列是输入特征（上下文），最后一列是分类标签（1-7，代表7种不同的类别）
+#     num_actions = 7 # Statlog 数据集有 7 个类别
+#     if shuffle_rows:
+#         np.random.shuffle(data) #打破数据的原有顺序
+#     data = data[:num_contexts, :]  # 只取前num_contexts行数据
+#     # 分离特征和标签
+#     contexts = data[:, :-1] #提取所有行，除了最后一列的所有列作为上下文特征
+#     labels = data[:, -1].astype(int) - 1 #提取所有行，最后一列作为标签，并转换为整数类型，减1使标签从0开始
+#     # 移除代表性不足的类别，移除类别样本过少的数据点
+#     if remove_underrepresented:
+#         contexts, labels = remove_underrepresented_classes(contexts, labels)
+#     return classification_to_bandit_problem(contexts, labels, num_actions)  #转换为赌博机问题，返回数据集（上下文，奖励矩阵(样本数量, 动作数量)）和（最优奖励、最优动作）
+
 def sample_statlog_data(file_name, num_contexts, shuffle_rows=True,
                         remove_underrepresented=False):
-    """Returns bandit problem dataset based on the UCI statlog data."""
+    """Returns bandit problem dataset based on the UCI statlog data.
+    Now includes feature normalization (standardization).
+    """
     data = np.loadtxt(file_name)
-    # 假设 file_name = "statlog.txt"
-    # 数据格式: 每行 = [特征1, 特征2, ..., 特征9, 标签]
-    # 前面的列是输入特征（上下文），最后一列是分类标签（1-7，代表7种不同的类别）
-    num_actions = 7 # Statlog 数据集有 7 个类别
+    num_actions = 7  # Statlog 数据集有 7 个类别
     if shuffle_rows:
-        np.random.shuffle(data) #打破数据的原有顺序
-    data = data[:num_contexts, :]  # 只取前num_contexts行数据
-    # 分离特征和标签
-    contexts = data[:, :-1] #提取所有行，除了最后一列的所有列作为上下文特征
-    labels = data[:, -1].astype(int) - 1 #提取所有行，最后一列作为标签，并转换为整数类型，减1使标签从0开始
-    # 移除代表性不足的类别，移除类别样本过少的数据点
+        np.random.shuffle(data)
+    # ⚠️ 先截断，再做 normalization（避免信息泄露）
+    data = data[:num_contexts, :]
+    # ===== 分离特征和标签 =====
+    contexts = data[:, :-1]
+    labels = data[:, -1].astype(int) - 1
+    # ===== 可选：移除小类 =====
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
-    return classification_to_bandit_problem(contexts, labels, num_actions)  #转换为赌博机问题，返回数据集（上下文，奖励矩阵(样本数量, 动作数量)）和（最优奖励、最优动作）
+    # ===== ✅ 关键：Standardization =====
+    scaler = StandardScaler()
+    contexts = scaler.fit_transform(contexts).astype(np.float32)
+    # ===== 可选：clip（防止极端值）=====
+    contexts = np.clip(contexts, -5, 5)
+    # ===== 转 bandit =====
+    return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
 def sample_adult_data(num_contexts, shuffle_rows=True,
@@ -215,7 +349,7 @@ def sample_adult_data(num_contexts, shuffle_rows=True,
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
     
-    num_actions = len(np.unique(labels))
+    num_actions = 7
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
@@ -257,9 +391,29 @@ def sample_census_data(num_contexts, shuffle_rows=True,
 def sample_covertype_data(num_contexts, shuffle_rows=True,
                           remove_underrepresented=False):
     """Returns bandit problem dataset based on the UCI covertype data.
-    优先从本地 datasets/covertype.npz 加载，如小有缺则从 UCI 在线拉取。
+    优先从本地 raw 加载，其次本地 datasets/covertype.npz，最后才从 UCI 在线拉取。
     """
+    raw_gz = os.path.join(_DATASETS_DIR, "raw", "covertype", "covtype.data.gz")
     local_npz = os.path.join(_DATASETS_DIR, "covertype.npz")
+
+    if os.path.exists(raw_gz):
+        data = _load_gzip_csv(raw_gz, delimiter=",")
+        if shuffle_rows:
+            np.random.shuffle(data)
+        if num_contexts > len(data):
+            num_contexts = len(data)
+        data = data[:num_contexts, :]
+
+        contexts = data[:, :-1]
+        scaler = StandardScaler()
+        contexts = scaler.fit_transform(contexts).astype(np.float32)
+        contexts = np.clip(contexts, -5, 5)
+        labels = data[:, -1].astype(int)
+        if remove_underrepresented:
+            contexts, labels = remove_underrepresented_classes(contexts, labels)
+        num_actions = 7
+        return classification_to_bandit_problem(contexts, labels, num_actions)
+
     if os.path.exists(local_npz):
         return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
 
@@ -277,19 +431,47 @@ def sample_covertype_data(num_contexts, shuffle_rows=True,
     data = data[:num_contexts, :]
 
     contexts = data[:, :-1]
+    scaler = StandardScaler()
+    contexts = scaler.fit_transform(contexts).astype(np.float32)
+    contexts = np.clip(contexts, -5, 5)
     labels = data[:, -1].astype(int)
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
-    num_actions = len(np.unique(labels))
+    num_actions = 7
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
 def sample_magic_data(num_contexts, shuffle_rows=True,
                       remove_underrepresented=False):
     """Returns bandit problem dataset based on the UCI MAGIC Gamma Telescope data.
-    优先从本地 datasets/magic.npz 加载，如小有缺则从 UCI 在线拉取。
+    优先从本地 raw 加载，其次本地 datasets/magic.npz，最后才从 UCI 在线拉取。
     """
+    raw_file = os.path.join(_DATASETS_DIR, "raw", "magic+gamma+telescope", "magic04.data")
     local_npz = os.path.join(_DATASETS_DIR, "magic.npz")
+
+    if os.path.exists(raw_file):
+        data = pd.read_csv(raw_file, header=None)
+        contexts = data.iloc[:, :-1].to_numpy(dtype=np.float32)
+        labels = pd.factorize(data.iloc[:, -1])[0].astype(int)
+
+        if shuffle_rows:
+            idx = np.random.permutation(len(contexts))
+            contexts = contexts[idx]
+            labels = labels[idx]
+
+        if num_contexts > len(contexts):
+            num_contexts = len(contexts)
+        contexts = contexts[:num_contexts]
+        scaler = StandardScaler()
+        contexts = scaler.fit_transform(contexts).astype(np.float32)
+        contexts = np.clip(contexts, -5, 5)
+        labels = labels[:num_contexts]
+
+        if remove_underrepresented:
+            contexts, labels = remove_underrepresented_classes(contexts, labels)
+        num_actions = 2
+        return classification_to_bandit_problem(contexts, labels, num_actions)
+
     if os.path.exists(local_npz):
         return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
 
@@ -311,19 +493,43 @@ def sample_magic_data(num_contexts, shuffle_rows=True,
     data = data[:num_contexts, :]
 
     contexts = data[:, :-1]
+    scaler = StandardScaler()
+    contexts = scaler.fit_transform(contexts).astype(np.float32)
+    contexts = np.clip(contexts, -5, 5)
     labels = data[:, -1].astype(int)
     if remove_underrepresented:
         contexts, labels = remove_underrepresented_classes(contexts, labels)
-    num_actions = len(np.unique(labels))
+    num_actions = 2
     return classification_to_bandit_problem(contexts, labels, num_actions)
 
 
 def sample_mnist_data(num_contexts, shuffle_rows=True,
                       remove_underrepresented=False):
     """Returns bandit problem dataset based on MNIST (OpenML mnist_784).
-    优先从本地 datasets/mnist.npz 加载，如小有缺则从 OpenML 在线拉取。
+    优先从本地 raw 加载，其次本地 datasets/mnist.npz，最后才从 OpenML 在线拉取。
     """
+    raw_pattern = os.path.join(_DATASETS_DIR, "raw", "mnist", "*.parquet")
     local_npz = os.path.join(_DATASETS_DIR, "mnist.npz")
+
+    raw_files = sorted(glob.glob(raw_pattern))
+    if raw_files:
+        X, labels = _load_mnist_parquet_as_arrays(raw_files)
+
+        if shuffle_rows:
+            idx = np.random.permutation(len(X))
+            X = X[idx]
+            labels = labels[idx]
+        if num_contexts > len(X):
+            num_contexts = len(X)
+        X = X[:num_contexts]
+        X = X.astype(np.float32) / 255.0
+        labels = labels[:num_contexts]
+
+        if remove_underrepresented:
+            X, labels = remove_underrepresented_classes(X, labels)
+        num_actions = 10
+        return classification_to_bandit_problem(X, labels, num_actions)
+
     if os.path.exists(local_npz):
         return _load_bandit_npz(local_npz, num_contexts, shuffle_rows)
 
@@ -340,11 +546,12 @@ def sample_mnist_data(num_contexts, shuffle_rows=True,
     if num_contexts > len(X):
         num_contexts = len(X)
     X = X[:num_contexts]
+    X = X.astype(np.float32) / 255.0
     labels = labels[:num_contexts]
 
     if remove_underrepresented:
         X, labels = remove_underrepresented_classes(X, labels)
-    num_actions = len(np.unique(labels))
+    num_actions = 10
     return classification_to_bandit_problem(X, labels, num_actions)
 
 # 将分类数据转换为赌博机问题格式，奖励为0，1
@@ -454,32 +661,93 @@ def sample_ag_news_data(file_name, num_contexts, shuffle_rows=True, return_texts
     return dataset, (opt_rewards, opt_actions)
 
 
-def sample_statlog_shuttle_data(num_contexts, shuffle_rows=True,
-                                remove_underrepresented=False):
-    """Returns bandit problem dataset based on the Statlog Shuttle dataset using ucimlrepo."""
-    # Fetch Statlog Shuttle dataset from UCI
-    shuttle = fetch_ucirepo(id=148)
-    features = shuttle.data.features
-    targets = shuttle.data.targets
-    
-    # Combine features and targets
-    data = pd.concat([features, targets], axis=1)
-    
-    # Convert to numpy array
-    data = data.values
-    
+# def sample_statlog_shuttle_data(num_contexts, shuffle_rows=True,
+#                                 remove_underrepresented=False):
+#     """Returns bandit problem dataset based on the Statlog Shuttle dataset.
+
+#     Priority:
+#       1) Local raw files under datasets/raw/statlog+shuttle
+#       2) Online fallback via ucimlrepo
+#     """
+#     local_dir = os.path.join(_DATASETS_DIR, "raw", "statlog+shuttle")
+#     local_parts = []
+
+#     tst_path = os.path.join(local_dir, "shuttle.tst")
+#     trn_path = os.path.join(local_dir, "shuttle.trn")
+#     trn_z_path = os.path.join(local_dir, "shuttle.trn.Z")
+
+#     if os.path.exists(tst_path):
+#         local_parts.append(np.loadtxt(tst_path, dtype=np.float32))
+
+#     if os.path.exists(trn_path):
+#         local_parts.append(np.loadtxt(trn_path, dtype=np.float32))
+#     elif os.path.exists(trn_z_path):
+#         # Use gzip CLI for .Z data on Unix-like systems.
+#         try:
+#             proc = subprocess.run(
+#                 ["gzip", "-dc", trn_z_path],
+#                 capture_output=True,
+#                 text=True,
+#                 check=True,
+#             )
+#             local_parts.append(np.loadtxt(io.StringIO(proc.stdout), dtype=np.float32))
+#         except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+#             pass
+
+#     if local_parts:
+#         data = np.vstack(local_parts)
+#     else:
+#         # Fallback: fetch from UCI
+#         shuttle = fetch_ucirepo(id=148)
+#         features = shuttle.data.features
+#         targets = shuttle.data.targets
+#         data = pd.concat([features, targets], axis=1).values.astype(np.float32)
+
+#     if shuffle_rows:
+#         np.random.shuffle(data)
+
+#     if num_contexts > len(data):
+#         num_contexts = len(data)
+#     data = data[:num_contexts, :]
+
+#     contexts = data[:, :-1]
+#     labels = data[:, -1].astype(int)
+
+#     if remove_underrepresented:
+#         contexts, labels = remove_underrepresented_classes(contexts, labels)
+
+#     num_actions = len(np.unique(labels))
+#     return classification_to_bandit_problem(contexts, labels, num_actions)
+
+
+def sample_statlog_shuttle_data(num_contexts, shuffle_rows=True, drop_time=True):
+    local_dir = os.path.join(_DATASETS_DIR, "raw", "statlog+shuttle")
+
+    trn_path = os.path.join(local_dir, "shuttle.trn")
+    tst_path = os.path.join(local_dir, "shuttle.tst")
+
+    trn = np.loadtxt(trn_path, dtype=np.float32)
+    tst = np.loadtxt(tst_path, dtype=np.float32)
+
+    data = np.vstack([trn, tst])
+
     if shuffle_rows:
         np.random.shuffle(data)
-    
+
     if num_contexts > len(data):
         num_contexts = len(data)
     data = data[:num_contexts, :]
-    
-    contexts = data[:, :-1]
-    labels = data[:, -1].astype(int)
-    
-    if remove_underrepresented:
-        contexts, labels = remove_underrepresented_classes(contexts, labels)
-    
-    num_actions = len(np.unique(labels))
+
+    if drop_time:
+        contexts = data[:, 1:-1]   # 去掉第一列 time
+    else:
+        contexts = data[:, :-1]    # 保留全部 9 维
+
+    labels = data[:, -1].astype(int) - 1   # 1..7 -> 0..6
+
+    scaler = StandardScaler()
+    contexts = scaler.fit_transform(contexts).astype(np.float32)
+    contexts = np.clip(contexts, -5, 5)
+
+    num_actions = 7
     return classification_to_bandit_problem(contexts, labels, num_actions)

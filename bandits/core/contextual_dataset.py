@@ -15,6 +15,41 @@
 
 """Define a data buffer for contextual bandit algorithms (PyTorch version)."""
 
+# ============================================================================
+# 文件说明（输入 / 输出 / 功能）
+#
+# 1) 主要输入
+# - 初始化输入：
+#   - contexts (np.ndarray): 上下文矩阵，形状通常为 [num_samples, context_dim]。
+#   - rewards (np.ndarray): 奖励数据，可为：
+#     - [num_samples]（每个样本一个标量奖励）
+#     - [num_samples, num_actions]（每个样本对每个动作一条奖励）
+# - 在线追加输入：
+#   - add(context, action, reward): 增量写入一条 (上下文, 动作, 奖励) 交互数据。
+# - 采样输入：
+#   - get_batch(batch_size)、get_batch_with_weights(batch_size)
+#   - get_batch_for_action(action)
+#   - set_buffer_size(buffer_size)
+#
+# 2) 主要输出
+# - 数据集接口输出：
+#   - __len__() -> 样本数
+#   - __getitem__(idx) -> (context_tensor, reward_tensor)
+# - 训练采样输出：
+#   - get_batch(...) -> (contexts, rewards)
+#   - get_batch_with_weights(...) -> (contexts, rewards, one-hot weights)
+#   - get_batch_for_action(action) -> (contexts_for_action, rewards_for_action)
+# - 元信息输出：
+#   - num_points()、context_dim、num_actions
+#
+# 3) 实现功能
+# - 实现一个面向上下文 Bandit 的 PyTorch 数据缓冲区/数据集容器：
+#   统一管理上下文与奖励数据，并支持在线追加样本。
+# - 支持随机小批量采样，以及仅从最近 buffer_size 条样本中采样。
+# - 支持按动作筛选历史样本，便于每个动作单独建模或分析。
+# - 提供 Dataset 标准接口，可直接用于 PyTorch 训练流程。
+# ============================================================================
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

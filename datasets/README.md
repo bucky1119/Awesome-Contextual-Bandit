@@ -20,17 +20,13 @@ foo.npz
 
 | 文件 | 全名 | 样本数 | 特征维度 | 臂数 | 文件大小 | 任务 | 格式 |
 | :--- | :--- | ---: | ---: | ---: | ---: | :--- | :--- |
-
 | `statlog.npz` | Statlog (Shuttle) | 43,500 | 9 | 7 | 0.5 MB | 7分类 | npz |
 | `magic.npz` | MAGIC Gamma Telescope | 19,020 | 10 | 2 | 0.7 MB | 2分类 | npz |
 | `covertype.npz` | Forest Covertype | 581,012 | 54 | 7 | 13.5 MB | 7分类 | npz |
 | `mnist.npz` | MNIST Handwritten Digits | 70,000 | 784 | 10 | 18.6 MB | 10分类（数字 0–9） | npz |
-
-
 | `newsgroups.npz` | 20 Newsgroups（6 类，LSA 50 维） | 5,851 | 50 | 6 | 1.1 MB | 6分类 | npz |
 | `ag_news.npz` | AG News（TF-IDF + SVD 100 维） | 20,000 | 15 | 4 | 2.1 MB | 4分类（World / Sports / Business / Sci&Tech） | npz |
 | `ag_news_tfidf_svd100.npz` | AG News TF-IDF SVD100（备用版本） | 20,000 | 100 | 4 | 9.6 MB | 4分类 | npz |
-
 | `adult.npz` | Adult Income（Census Income） | 32,561 | 108 | 2 | 0.6 MB | 2分类（收入 >50K / ≤50K） | npz |
 | `adult.data` | adult.data | — | — | — | 4.0 MB | — | raw |
 | `statlog.trn` | statlog.trn | — | — | — | 1.2 MB | — | raw |
@@ -54,6 +50,21 @@ foo.npz
 - **完整性**: ✅ 通过
 - **描述**: 预测科罗拉多州荒野地区的森林覆盖类型，特征包括海拔、坡度、土壤类型（one-hot）等 54 个制图变量。
 
+#### Covertype 原始数据格式（本地 raw）
+
+- **目录**: `datasets/raw/covertype/`
+- **已下载文件**: `covtype.data.gz`, `covtype.info`
+- **行格式（已核验）**: 每行 55 列，以逗号分隔
+	- 前 54 列：输入特征
+	- 第 55 列：类别标签（原始标签范围 1–7）
+- **属性口径**:
+	- 官方文档写的是 12 个属性组，但原始文件展开后共 54 列特征。
+	- 其中包括 10 个数值变量、4 列 wilderness one-hot、40 列 soil type one-hot。
+- **代码加载优先级**:
+	1. 优先读取本地 `datasets/raw/covertype/covtype.data.gz`
+	2. 若 raw 不存在，则读取 `datasets/covertype.npz`
+	3. 若本地均不可用，才回退到 `ucimlrepo` 在线下载
+
 ### MNIST Handwritten Digits
 
 - **文件**: `mnist.npz`
@@ -69,6 +80,23 @@ foo.npz
 - **完整性**: ✅ 通过
 - **描述**: 手写数字灰度图像，28×28 像素展平为 784 维向量，像素值归一化至 [0,1]。
 
+#### MNIST 原始数据格式（本地 raw）
+
+- **目录**: `datasets/raw/mnist/`
+- **已下载文件**: `0000.parquet`（当前已检测到）
+- **文件格式（已核验）**:
+	- parquet 表包含两列：`image`, `label`
+	- `label` 是数字类别标签（0–9）
+	- `image` 不是直接的 784 维数组，而是一个字典对象，包含：
+		- `bytes`: PNG 编码后的图像字节流
+		- `path`: 路径字段（当前样本中为 `None`）
+- **当前采样逻辑**:
+	- 代码会先把 `image.bytes` 解码成灰度图，再展平成 784 维 float32 向量。
+- **代码加载优先级**:
+	1. 优先读取本地 `datasets/raw/mnist/*.parquet`
+	2. 若 raw 不存在，则读取 `datasets/mnist.npz`
+	3. 若本地均不可用，才回退到 OpenML 在线下载
+
 ### Statlog (Shuttle) （Asuncion & Newman,2007）
 
 - **文件**: `statlog.npz`
@@ -83,6 +111,29 @@ foo.npz
 - **文件大小**: 0.5 MB
 - **完整性**: ✅ 通过
 - **描述**: NASA 航天飞机传感器数据，9 个数值特征，用于推断飞行控制系统的工作状态（7 类）。标签由 1–7 映射为 0–6。
+
+#### Statlog+Shuttle 原始数据格式（本地 raw）
+
+- **目录**: `datasets/raw/statlog+shuttle/`
+- **已下载文件**: `shuttle.tst`, `shuttle.trn.Z`, `Index`（以及说明文档）
+- **行格式（已核验）**: 每行 10 列，以空格分隔
+	- 前 9 列：数值特征（context）
+	- 第 10 列：类别标签（原始标签范围 1–7）
+- **口径澄清**:
+	- UCI/StatLog 文档写的是 “9 attributes”，这是指 **9 个输入属性**。
+	- 原始文本文件还额外包含 1 列标签，所以文件层面是 **10 列**。
+	- 文档中也明确提到 “The first one being time”。若某些实现把 time 列去掉，则会变成 8 个特征；你看到“8 特征”的说法通常来自这种预处理版本。
+- **样例**:
+	- `55 0 81 0 -6 11 25 88 64 4`
+	- `56 0 96 0 52 -4 40 44 4 4`
+- **压缩文件说明**: `shuttle.trn.Z` 可通过 `gzip -dc` 或 `uncompress -c` 直接解压读取。
+- **标签分布（仅 shuttle.tst）**: 1 类占比最高，2/3/6/7 类样本较少（完整训练应与 `shuttle.trn.Z` 合并后使用）。
+
+#### 代码加载优先级（与你当前实现一致）
+
+- 在 `bandits/data/data_sampler.py` 的 `sample_statlog_shuttle_data(...)` 中：
+	1. 优先读取本地 `datasets/raw/statlog+shuttle/`（先读 `shuttle.tst`，再读 `shuttle.trn` 或 `shuttle.trn.Z`）。
+	2. 仅当本地文件不可用时，才回退到 `ucimlrepo` 在线下载。
 
 ### 20 Newsgroups（6 类，LSA 50 维）
 
@@ -113,6 +164,20 @@ foo.npz
 - **文件大小**: 0.7 MB
 - **完整性**: ✅ 通过
 - **描述**: 大气切伦科夫望远镜模拟数据，10 个数值特征，区分 gamma 射线事件与背景强子噪声。
+
+#### MAGIC 原始数据格式（本地 raw）
+
+- **目录**: `datasets/raw/magic+gamma+telescope/`
+- **已下载文件**: `magic04.data`, `magic04.names`
+- **行格式（已核验）**: 每行 11 列，以逗号分隔
+	- 前 10 列：数值特征
+	- 第 11 列：类别标签，取值为 `g` 或 `h`
+- **标签处理口径**:
+	- 当前代码使用 `pd.factorize(...)` 将字符串标签映射为连续整数类别，再转换为 2 臂 Bandit 奖励。
+- **代码加载优先级**:
+	1. 优先读取本地 `datasets/raw/magic+gamma+telescope/magic04.data`
+	2. 若 raw 不存在，则读取 `datasets/magic.npz`
+	3. 若本地均不可用，才回退到 `ucimlrepo` 在线下载
 
 ### AG News（TF-IDF + SVD 100 维）
 

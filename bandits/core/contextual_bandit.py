@@ -18,6 +18,36 @@ We can feed the data, sample a context, its reward for a specific action, and
 also the optimal action for a given context.
 """
 
+# ============================================================================
+# 文件说明（输入 / 输出 / 功能）
+#
+# 1) 主要输入
+# - context_dim (int): 上下文特征维度 d。
+# - num_actions / n_arms (int): 动作（臂）数量 k。
+# - dataset (np.ndarray): 形状为 [n, d + k] 的数据矩阵。
+#   前 d 列是上下文特征，后 k 列是对应 k 个动作的奖励。
+# - algos (List): 算法实例列表。每个算法需要提供：
+#   - action(context) -> action_id
+#   - update(context, action, reward)
+#
+# 2) 主要输出
+# - run_contextual_bandit(...) 返回：
+#   - h_actions (np.ndarray): 形状 [n, num_algorithms]，记录每轮每个算法选择的动作。
+#   - h_rewards (np.ndarray): 形状 [n, num_algorithms]，记录每轮每个算法获得的奖励。
+# - ContextualBandit 的接口输出：
+#   - context(i): 第 i 个上下文向量。
+#   - reward(i, a): 第 i 个上下文下动作 a 的奖励。
+#   - optimal(i): 第 i 个上下文的最优动作（离线最优）。
+#   - step(a): 返回 (current_context, reward)，并推进时间步。
+#
+# 3) 实现功能
+# - 提供一个可复现实验的上下文 Bandit 环境（ContextualBandit）：
+#   支持喂入离线数据、按顺序/打乱顺序取上下文、查询奖励与最优动作。
+# - 提供实验驱动函数 run_contextual_bandit(...)：
+#   在每个上下文上让所有算法做动作选择、收集奖励、回传更新，最终输出
+#   全过程的动作与奖励历史矩阵，便于后续统计与可视化分析。
+# ============================================================================
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

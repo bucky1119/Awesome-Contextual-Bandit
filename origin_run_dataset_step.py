@@ -1032,29 +1032,6 @@ def cmd_baselines(args):
             # 使用时间戳作为命名前缀
             record_stem = f"{run_timestamp}_{bname}"
             save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta, timestamp=run_timestamp)
-
-            # 自动记录单算法实验日志（基础信息、指标、逐轮 CSV、Markdown 模板）
-            try:
-                run_exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
-                log_dir = save_single_run_log(
-                    exp_dir=run_exp_d,
-                    dataset_name=dname,
-                    algorithm_name=bname,
-                    args=vars(args),
-                    meta=meta,
-                    result=result,
-                    prompt_info={
-                        "prior_backend": prior_backend,
-                        "prompt_template": prompt_template,
-                        "prior_prompt_style": getattr(args, "prior_prompt_style", "auto"),
-                        "action_text_count": len(action_texts) if action_texts is not None else 0,
-                    },
-                    plot_paths=None,
-                )
-                print(f"  Auto experiment log saved: {log_dir}")
-            except Exception as e:
-                print(f"  [WARN] Failed to save auto experiment log for {bname}: {e}")
-
             all_data[bname] = result
             
 
@@ -1064,9 +1041,7 @@ def cmd_baselines(args):
             print_summary(all_data, n_rounds)
             tag = f"{run_timestamp}_baselines_" + _sanitize_name("_".join(baselines))
             run_exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
-            regret_plot_fp = plot_regret(dname, all_data, n_rounds, seed, tag=tag, exp_d=run_exp_d)
-            cum_reward_plot_fp = plot_cumulative_reward(dname, all_data, n_rounds, seed, tag=tag, exp_d=run_exp_d)
-            avg_reward_plot_fp = plot_average_reward(dname, all_data, n_rounds, seed, tag=tag, exp_d=run_exp_d)
+            plot_regret(dname, all_data, n_rounds, seed, tag=tag, exp_d=run_exp_d)
 
             def _to_json_safe(v):
                 """将不可序列化的对象（如 argparse.Namespace）转为可序列化格式。"""
@@ -1104,33 +1079,6 @@ def cmd_baselines(args):
             with open(fp, "w") as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
             print(f"  Summary saved: {fp}")
-
-            # 自动记录数据集级实验总结日志，便于后续补充手写分析
-            try:
-                summary_results = {
-                    name: {
-                        "final_cumulative_regret": float(data["cumulative_regret"][-1]),
-                        "average_reward": float(np.mean(data["rewards"])),
-                        "accuracy": float(np.mean(data["actions"] == data["opt_actions"])),
-                    }
-                    for name, data in all_data.items()
-                }
-                summary_log_dir = save_dataset_summary_log(
-                    exp_dir=run_exp_d,
-                    dataset_name=dname,
-                    summary_name=f"{run_timestamp}_baselines_summary",
-                    args=vars(args),
-                    summary_meta=summary["meta"],
-                    summary_results=summary_results,
-                    plot_paths={
-                        "regret_plot": regret_plot_fp,
-                        "cumulative_reward_plot": cum_reward_plot_fp,
-                        "average_reward_plot": avg_reward_plot_fp,
-                    },
-                )
-                print(f"  Auto dataset summary log saved: {summary_log_dir}")
-            except Exception as e:
-                print(f"  [WARN] Failed to save dataset summary log: {e}")
 
 
 def cmd_ourmethod(args):
@@ -1342,27 +1290,6 @@ def cmd_ourmethod(args):
         record_stem = f"{run_timestamp}_{our_stem}"
 
         save_algo_log(dname, record_stem, result, n_rounds, seed, meta=meta, timestamp=run_timestamp)
-
-        # 自动记录 OurMethod 单次实验日志
-        try:
-            run_exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
-            log_dir = save_single_run_log(
-                exp_dir=run_exp_d,
-                dataset_name=dname,
-                algorithm_name=our_stem,
-                args=vars(args),
-                meta=meta,
-                result=result,
-                prompt_info={
-                    "model_for_name": model_for_name,
-                    "ablation_mode": getattr(args, "ablation_mode", "none"),
-                },
-                plot_paths=None,
-            )
-            print(f"  Auto experiment log saved: {log_dir}")
-        except Exception as e:
-            print(f"  [WARN] Failed to save auto experiment log for OurMethod: {e}")
-
         print(
             f"  OurMethod[{model_for_name}] cum_regret={result['cumulative_regret'][-1]:.1f}  "
             f"avg_reward={np.mean(result['rewards']):.4f}"
@@ -1461,32 +1388,10 @@ def cmd_ourmethod(args):
                 "times": result.get("times", {}),
             },
         }
-        run_exp_d = _exp_dir(dname, n_rounds, seed, timestamp=run_timestamp)
-        fp = os.path.join(run_exp_d, f"{record_stem}_summary.json")
+        fp = os.path.join(_exp_dir(dname, n_rounds, seed, timestamp=run_timestamp), f"{record_stem}_summary.json")
         with open(fp, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         print(f"  Summary saved: {fp}")
-
-        # 自动记录 OurMethod 数据集级 summary 日志（单算法版本）
-        try:
-            summary_log_dir = save_dataset_summary_log(
-                exp_dir=run_exp_d,
-                dataset_name=dname,
-                summary_name=f"{record_stem}_summary",
-                args=vars(args),
-                summary_meta=meta,
-                summary_results={
-                    our_stem: {
-                        "final_cumulative_regret": float(result["cumulative_regret"][-1]),
-                        "average_reward": float(np.mean(result["rewards"])),
-                        "accuracy": float(np.mean(result["actions"] == result["opt_actions"])),
-                    }
-                },
-                plot_paths=None,
-            )
-            print(f"  Auto dataset summary log saved: {summary_log_dir}")
-        except Exception as e:
-            print(f"  [WARN] Failed to save dataset summary log for OurMethod: {e}")
 
 
 def cmd_plot(args):
