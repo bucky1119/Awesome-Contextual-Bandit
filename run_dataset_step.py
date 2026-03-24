@@ -126,17 +126,12 @@ def load_newsgroups(n_rounds: int, cold_start_n: int, seed: int):
 
     _set_all_seeds(seed)
     total = n_rounds + cold_start_n
-    dataset, (opt_r_all, opt_a_all) = sample_newsgroups_data(data_path, total, shuffle_rows=True)
-
-    texts = None
-    try:
-        d = np.load(data_path, allow_pickle=True)
-        if "texts" in d:
-            texts = d["texts"]
-            if total < len(texts):
-                texts = texts[:total]
-    except Exception:
-        texts = None
+    dataset, (opt_r_all, opt_a_all), texts = sample_newsgroups_data(
+        data_path,
+        total,
+        shuffle_rows=True,
+        return_texts=True,
+    )
 
     actual_total = len(opt_r_all)
     if total > actual_total:
@@ -391,7 +386,7 @@ def _b_neural_linucb(num_actions: int, context_dim: int):
     h = {
         "context_dim": context_dim,
         "num_actions": num_actions,
-        "layer_sizes": [100, 100],
+        "layer_sizes": [100],
         "activation": "relu",
         "initial_lr": 0.001,
         "batch_size": 512,
@@ -404,7 +399,7 @@ def _b_neural_linucb(num_actions: int, context_dim: int):
         "alpha": 1,
         # "training_freq": 50,
         "training_freq": 10,
-        "training_epochs": 50,
+        "training_epochs": 100,
     }
     return NeuralLinUCBSampling(h, name="neural_linucb")
 
@@ -479,8 +474,13 @@ def _build_prior_provider(args, dataset_name: str, num_actions: int):
         return provider, action_texts, "precomputed"
 
     # local_llm 分支：按优先级解析模型来源
-    # 优先级：--llm_model_path > --custom_model > --model(别名)
-    model_path = getattr(args, "llm_model_path", None)
+    # 优先级：--llm_model > --custom_model > --model(别名)
+    model_ref = getattr(args, "llm_model", None)
+    if not model_ref:
+        # backward compatibility for older scripts
+        model_ref = getattr(args, "llm_model_path", None)
+
+    model_path = PRESET_LLM_MODELS.get(model_ref, model_ref) if model_ref else None
     if not model_path:
         model_path = getattr(args, "custom_model", None)
     if not model_path:
@@ -492,7 +492,7 @@ def _build_prior_provider(args, dataset_name: str, num_actions: int):
     # 以上都没提供则报错，提示用户至少提供一种模型配置
     if not model_path:
         raise ValueError(
-            "No model configured. Use --model/--custom_model or --llm_model_path"
+            "No model configured. Use --model/--custom_model or --llm_model"
         )
 
     # 缓存控制：允许通过开关禁用“跨运行缓存复用”
@@ -920,6 +920,11 @@ def _resolve_algorithm_selectors(selectors: List[str]) -> List[str]:
 # ====================================================================== #
 
 def cmd_baselines(args):
+    if getattr(args, "llm_model", None) and not getattr(args, "use_llm_prior", False):
+        # If user explicitly specifies an LLM model, default to enabling LLM prior.
+        args.use_llm_prior = True
+        print("[INFO] --llm_model detected; auto enabling --use_llm_prior")
+
     global BASELINE_RUNTIME_CONFIG
     BASELINE_RUNTIME_CONFIG = {
         "prior_dump_prompts": getattr(args, "prior_dump_prompts", 0),
@@ -1467,6 +1472,22 @@ def cmd_ourmethod(args):
             json.dump(summary, f, indent=2, ensure_ascii=False)
         print(f"  Summary saved: {fp}")
 
+        # 与 baselines 命令对齐：OurMethod 结束后自动产出至少一张累计遗憾图
+        try:
+            plot_data = {our_stem: result}
+            plot_tag = f"{run_timestamp}_{our_stem}"
+            plot_fp = plot_regret(
+                dname,
+                plot_data,
+                n_rounds,
+                seed,
+                tag=plot_tag,
+                exp_d=run_exp_d,
+            )
+            print(f"  Auto plot saved: {plot_fp}")
+        except Exception as e:
+            print(f"  [WARN] Failed to generate OurMethod plot: {e}")
+
         # 自动记录 OurMethod 数据集级 summary 日志（单算法版本）
         try:
             summary_log_dir = save_dataset_summary_log(
@@ -1595,7 +1616,7 @@ def cmd_full(args):
         prior_source=args.prior_source,
         precomputed_prior_path=args.precomputed_prior_path,
         prior_prompt_style=args.prior_prompt_style,
-        llm_model_path=args.llm_model_path,
+        llm_model=args.llm_model,
         llm_tokenizer_path=args.llm_tokenizer_path,
         llm_device=args.llm_device,
         llm_dtype=args.llm_dtype,
@@ -1660,7 +1681,14 @@ def main():
     p1.add_argument("--prior_source", type=str, default="local_llm", choices=["local_llm", "precomputed"], help="Prior provider backend")
     p1.add_argument("--precomputed_prior_path", type=str, default=None, help="Path to precomputed priors when prior_source=precomputed")
     p1.add_argument("--prior_prompt_style", type=str, default="auto", help="Prompt style hint used by prompt registry")
-    p1.add_argument("--llm_model_path", type=str, default=None, help="Local model directory for AutoModelForCausalLM")
+    p1.add_argument(
+        "--llm_model",
+        "--llm_model_path",
+        dest="llm_model",
+        type=str,
+        default=None,
+        help="LLM model alias or local model directory for AutoModelForCausalLM",
+    )
     p1.add_argument("--llm_tokenizer_path", type=str, default=None, help="Local tokenizer directory (defaults to model path)")
     p1.add_argument("--llm_device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="Inference device")
     p1.add_argument("--llm_dtype", type=str, default="auto", choices=["auto", "float32", "float16", "bfloat16"], help="Inference dtype")
@@ -1725,7 +1753,14 @@ def main():
     p4.add_argument("--prior_source", type=str, default="local_llm", choices=["local_llm", "precomputed"], help="Prior provider backend")
     p4.add_argument("--precomputed_prior_path", type=str, default=None, help="Path to precomputed priors when prior_source=precomputed")
     p4.add_argument("--prior_prompt_style", type=str, default="auto", help="Prompt style hint used by prompt registry")
-    p4.add_argument("--llm_model_path", type=str, default=None, help="Local model directory for AutoModelForCausalLM")
+    p4.add_argument(
+        "--llm_model",
+        "--llm_model_path",
+        dest="llm_model",
+        type=str,
+        default=None,
+        help="LLM model alias or local model directory for AutoModelForCausalLM",
+    )
     p4.add_argument("--llm_tokenizer_path", type=str, default=None, help="Local tokenizer directory (defaults to model path)")
     p4.add_argument("--llm_device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="Inference device")
     p4.add_argument("--llm_dtype", type=str, default="auto", choices=["auto", "float32", "float16", "bfloat16"], help="Inference dtype")
@@ -1736,6 +1771,10 @@ def main():
     p4.add_argument("--prior_debug_dir", type=str, default=os.path.join(RESULTS_DIR, "prior_debug"), help="Debug output directory for dumped prior prompts")
 
     args = parser.parse_args()
+
+    if args.command in ("baselines", "full") and getattr(args, "llm_model", None) and not getattr(args, "use_llm_prior", False):
+        # Keep CLI behavior intuitive: providing a model implies user intends to use LLM prior.
+        args.use_llm_prior = True
 
     if args.command == "baselines":
         cmd_baselines(args)

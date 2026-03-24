@@ -596,7 +596,7 @@ def remove_underrepresented_classes(features, labels, thresh=0.0005):
     return features[mask], labels[mask]
 
 
-def sample_newsgroups_data(file_name, num_contexts, shuffle_rows=True):
+def sample_newsgroups_data(file_name, num_contexts, shuffle_rows=True, return_texts=False):
     """Returns bandit problem dataset based on the 20 Newsgroups semantic data.
 
     The .npz file is pre-built by prepare_newsgroups.py and contains:
@@ -604,23 +604,30 @@ def sample_newsgroups_data(file_name, num_contexts, shuffle_rows=True):
       opt_rewards  – (n,)
       opt_actions  – (n,)
     """
-    d = np.load(file_name)
+    d = np.load(file_name, allow_pickle=True)
     dataset = d['dataset'].astype(np.float32)
     opt_rewards = d['opt_rewards'].astype(np.float32)
     opt_actions = d['opt_actions'].astype(int)
     num_actions = int(d['num_actions'])
+    texts = d['texts'] if 'texts' in d.files else None
 
     if shuffle_rows:
         idx = np.random.permutation(len(dataset))
         dataset = dataset[idx]
         opt_rewards = opt_rewards[idx]
         opt_actions = opt_actions[idx]
+        if texts is not None:
+            texts = texts[idx]
 
     if num_contexts < len(dataset):
         dataset = dataset[:num_contexts]
         opt_rewards = opt_rewards[:num_contexts]
         opt_actions = opt_actions[:num_contexts]
+        if texts is not None:
+            texts = texts[:num_contexts]
 
+    if return_texts:
+        return dataset, (opt_rewards, opt_actions), texts
     return dataset, (opt_rewards, opt_actions)
 
 

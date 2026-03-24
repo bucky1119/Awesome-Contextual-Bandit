@@ -524,14 +524,26 @@ def save_dataset_summary_log(
             lines.append(f"- **{k}**: {v}")
         lines.append("")
 
-    lines.append("## 3. 关键观察（请手写补充）")
+    lines.append("## 3. 实验目标（请手写补充）")
+    lines.append("")
+    lines.append("- [ ] 本实验要验证什么？")
+    lines.append("- [ ] 主要对照 baseline 是谁？")
+    lines.append("- [ ] 预期现象是什么？")
+    lines.append("")
+
+    lines.append("## 4. 关键观察（请手写补充）")
     lines.append("")
     lines.append("1. ")
     lines.append("2. ")
     lines.append("3. ")
     lines.append("")
 
-    lines.append("## 4. 下一步（请手写补充）")
+    lines.append("## 5. 问题 / Debug 记录（请手写补充）")
+    lines.append("")
+    lines.append("- ")
+    lines.append("")
+
+    lines.append("## 6. 下一步计划（请手写补充）")
     lines.append("")
     lines.append("- ")
     lines.append("")
