@@ -13,7 +13,8 @@ logs/
 *.jsonl
 models/
 OurMethod/cold_start_data/
-
+datasets/raw/mindsmall
+qi
 # macOS
 .DS_Store
 

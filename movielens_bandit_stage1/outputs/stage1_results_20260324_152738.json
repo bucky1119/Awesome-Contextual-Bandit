@@ -1,0 +1,17 @@
+{
+  "dataset": "datasets/movielens_stage1_k5.npz",
+  "n_rounds": 500,
+  "seed": 42,
+  "linucb": {
+    "n_rounds": 500,
+    "cumulative_regret": 339.0,
+    "average_reward": 0.32199999690055847,
+    "accuracy": 0.32199999690055847
+  },
+  "neural_linucb": {
+    "n_rounds": 500,
+    "cumulative_regret": 367.0,
+    "average_reward": 0.26600000262260437,
+    "accuracy": 0.26600000262260437
+  }
+}
